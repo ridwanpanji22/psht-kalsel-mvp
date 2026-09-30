@@ -21,6 +21,12 @@ class CreateMembership
         $memberNumber = isset($attributes['member_number']) ? trim((string) $attributes['member_number']) : null;
         $memberNumber = $memberNumber === '' ? null : $memberNumber;
 
+        if (! in_array($attributes['organization_unit_id'], $actor->visibleUnitIds(), true)) {
+            throw ValidationException::withMessages([
+                'organization_unit_id' => 'Unit berada di luar cakupan operator.',
+            ]);
+        }
+
         if ($attributes['type'] === MembershipType::Warga && $memberNumber === null) {
             throw ValidationException::withMessages([
                 'member_number' => 'Nomor warga wajib diisi.',

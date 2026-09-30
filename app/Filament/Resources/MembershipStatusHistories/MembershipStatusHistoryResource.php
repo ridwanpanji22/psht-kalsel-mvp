@@ -2,16 +2,17 @@
 
 namespace App\Filament\Resources\MembershipStatusHistories;
 
-use App\Filament\Resources\MembershipStatusHistories\Pages\CreateMembershipStatusHistory;
 use App\Filament\Resources\MembershipStatusHistories\Pages\ListMembershipStatusHistories;
 use App\Filament\Resources\MembershipStatusHistories\Schemas\MembershipStatusHistoryForm;
 use App\Filament\Resources\MembershipStatusHistories\Tables\MembershipStatusHistoriesTable;
 use App\Models\MembershipStatusHistory;
+use App\Support\OrganizationScope;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class MembershipStatusHistoryResource extends Resource
 {
@@ -29,18 +30,23 @@ class MembershipStatusHistoryResource extends Resource
         return MembershipStatusHistoriesTable::configure($table);
     }
 
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->whereHas('membership', fn ($query) => $query->whereIn(
+            'organization_unit_id',
+            app(OrganizationScope::class)->visibleUnitIds(auth()->user()),
+        ));
+    }
+
     public static function getRelations(): array
     {
-        return [
-            //
-        ];
+        return [];
     }
 
     public static function getPages(): array
     {
         return [
             'index' => ListMembershipStatusHistories::route('/'),
-            'create' => CreateMembershipStatusHistory::route('/create'),
         ];
     }
 }

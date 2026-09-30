@@ -7,11 +7,13 @@ use App\Filament\Resources\UnitAssignments\Pages\ListUnitAssignments;
 use App\Filament\Resources\UnitAssignments\Schemas\UnitAssignmentForm;
 use App\Filament\Resources\UnitAssignments\Tables\UnitAssignmentsTable;
 use App\Models\UnitAssignment;
+use App\Support\OrganizationScope;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class UnitAssignmentResource extends Resource
 {
@@ -27,6 +29,14 @@ class UnitAssignmentResource extends Resource
     public static function table(Table $table): Table
     {
         return UnitAssignmentsTable::configure($table);
+    }
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->whereIn(
+            'organization_unit_id',
+            app(OrganizationScope::class)->visibleUnitIds(auth()->user()),
+        );
     }
 
     public static function getRelations(): array

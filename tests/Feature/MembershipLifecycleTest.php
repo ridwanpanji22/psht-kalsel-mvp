@@ -14,6 +14,7 @@ use App\Models\Membership;
 use App\Models\MembershipStatusHistory;
 use App\Models\OrganizationUnit;
 use App\Models\Person;
+use App\Models\UnitAssignment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Validation\ValidationException;
@@ -27,6 +28,10 @@ class MembershipLifecycleTest extends TestCase
     {
         $operator = User::factory()->create();
         $unit = OrganizationUnit::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $unit->id,
+        ]);
 
         $membership = app(CreateMembership::class)->handle($operator, [
             'name' => 'Siswa Baru',
@@ -44,6 +49,10 @@ class MembershipLifecycleTest extends TestCase
     {
         $operator = User::factory()->create();
         $unit = OrganizationUnit::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $unit->id,
+        ]);
 
         $membership = app(CreateMembership::class)->handle($operator, [
             'name' => 'Warga Lama',
@@ -61,11 +70,18 @@ class MembershipLifecycleTest extends TestCase
 
     public function test_rejects_warga_without_external_number(): void
     {
+        $operator = User::factory()->create();
+        $unit = OrganizationUnit::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $unit->id,
+        ]);
+
         $this->expectException(ValidationException::class);
 
-        app(CreateMembership::class)->handle(User::factory()->create(), [
+        app(CreateMembership::class)->handle($operator, [
             'name' => 'Warga Tanpa Nomor',
-            'organization_unit_id' => OrganizationUnit::factory()->create()->id,
+            'organization_unit_id' => $unit->id,
             'type' => MembershipType::Warga,
             'member_number' => null,
         ]);
@@ -75,6 +91,10 @@ class MembershipLifecycleTest extends TestCase
     {
         $operator = User::factory()->create();
         $unit = OrganizationUnit::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $unit->id,
+        ]);
         app(CreateMembership::class)->handle($operator, [
             'name' => 'Warga Pertama',
             'organization_unit_id' => $unit->id,
@@ -99,9 +119,19 @@ class MembershipLifecycleTest extends TestCase
     {
         $operator = User::factory()->create();
         $reviewer = User::factory()->create();
+
+        $unit = OrganizationUnit::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $unit->id,
+        ]);
+        UnitAssignment::factory()->create([
+            'user_id' => $reviewer->id,
+            'organization_unit_id' => $unit->id,
+        ]);
         $membership = app(CreateMembership::class)->handle($operator, [
             'name' => 'Siswa Disahkan',
-            'organization_unit_id' => OrganizationUnit::factory()->create()->id,
+            'organization_unit_id' => $unit->id,
             'type' => MembershipType::Siswa,
         ]);
 
@@ -121,9 +151,14 @@ class MembershipLifecycleTest extends TestCase
     public function test_archives_membership_without_deleting_history_or_person(): void
     {
         $operator = User::factory()->create();
+        $unit = OrganizationUnit::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $unit->id,
+        ]);
         $membership = app(CreateMembership::class)->handle($operator, [
             'name' => 'Siswa Diarsipkan',
-            'organization_unit_id' => OrganizationUnit::factory()->create()->id,
+            'organization_unit_id' => $unit->id,
             'type' => MembershipType::Siswa,
         ]);
 
