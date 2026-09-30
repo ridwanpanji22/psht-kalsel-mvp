@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\OrganizationPositions\Tables;
 
+use App\Models\OrganizationUnit;
 use App\Support\OrganizationScope;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
@@ -31,6 +32,8 @@ class OrganizationPositionsTable
                         ->whereIn('id', app(OrganizationScope::class)->visibleUnitIds(auth()->user()))
                         ->orderBy('name')->pluck('name', 'id')->all()),
             ])
+            ->emptyStateHeading('Belum ada jabatan pengurus')
+            ->emptyStateDescription('Tambahkan jabatan pengurus untuk unit dalam cakupan Anda.')
             ->recordActions([
                 EditAction::make(),
             ]);

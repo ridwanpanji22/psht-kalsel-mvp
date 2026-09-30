@@ -5,12 +5,29 @@ namespace Tests\Feature;
 use App\Actions\CreateOrganizationPosition;
 use App\Models\OrganizationPosition;
 use App\Models\OrganizationUnit;
+use App\Models\UnitAssignment;
+use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Tests\TestCase;
 
 class OrganizationPositionHistoryTest extends TestCase
 {
     use LazilyRefreshDatabase;
+
+    public function test_operator_can_open_organization_positions_index(): void
+    {
+        $unit = OrganizationUnit::factory()->create();
+        $operator = User::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $unit->id,
+        ]);
+        OrganizationPosition::factory()->create(['organization_unit_id' => $unit->id]);
+
+        $this->actingAs($operator)
+            ->get('/admin/organization-positions')
+            ->assertOk();
+    }
 
     public function test_ending_position_preserves_previous_assignment(): void
     {

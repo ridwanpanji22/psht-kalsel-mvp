@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Memberships\Tables;
 
 use App\Enums\MembershipStatus;
+use App\Enums\MembershipType;
 use App\Models\OrganizationUnit;
 use App\Support\OrganizationScope;
 use Filament\Tables\Columns\TextColumn;
@@ -21,13 +22,27 @@ class MembershipsTable
             ->columns([
                 TextColumn::make('person.name')->label('Nama')->searchable()->sortable(),
                 TextColumn::make('organizationUnit.name')->label('Unit'),
-                TextColumn::make('type')->label('Kategori')->badge(),
-                TextColumn::make('status')->label('Status')->badge(),
+                TextColumn::make('type')
+                    ->label('Kategori')
+                    ->badge()
+                    ->formatStateUsing(fn (mixed $state): string => match (true) {
+                        $state instanceof MembershipType => ucfirst($state->value),
+                        is_string($state) => ucfirst($state),
+                        default => (string) $state,
+                    }),
+                TextColumn::make('status')
+                    ->label('Status')
+                    ->badge()
+                    ->formatStateUsing(fn (mixed $state): string => match (true) {
+                        $state instanceof MembershipStatus => $state->label(),
+                        is_string($state) => MembershipStatus::tryFrom($state)?->label() ?? ucfirst($state),
+                        default => (string) $state,
+                    }),
                 TextColumn::make('member_number')->label('Nomor warga')->placeholder('—'),
             ])
             ->filters([
                 SelectFilter::make('status')->options(collect(MembershipStatus::cases())->mapWithKeys(
-                    fn (MembershipStatus $status): array => [$status->value => ucfirst($status->value)],
+                    fn (MembershipStatus $status): array => [$status->value => $status->label()],
                 )->all()),
                 SelectFilter::make('organization_unit_id')
                     ->label('Unit')
@@ -35,6 +50,8 @@ class MembershipsTable
                         ->whereIn('id', app(OrganizationScope::class)->visibleUnitIds(auth()->user()))
                         ->orderBy('name')->pluck('name', 'id')->all()),
             ])
+            ->emptyStateHeading('Belum ada anggota')
+            ->emptyStateDescription('Tambahkan anggota pada unit dalam cakupan Anda.')
             ->recordActions([]);
     }
 }

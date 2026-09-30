@@ -17,6 +17,14 @@ class TrainingLocationResource extends Resource
 {
     protected static ?string $model = TrainingLocation::class;
 
+    protected static ?string $modelLabel = 'tempat latihan';
+
+    protected static ?string $pluralModelLabel = 'tempat latihan';
+
+    protected static ?string $navigationLabel = 'Tempat Latihan';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Latihan & Peta';
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
 
     public static function form(Schema $schema): Schema

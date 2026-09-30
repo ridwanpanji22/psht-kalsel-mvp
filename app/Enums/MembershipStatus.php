@@ -9,6 +9,16 @@ enum MembershipStatus: string
     case Stopped = 'stopped';
     case Archived = 'archived';
 
+    public function label(): string
+    {
+        return match ($this) {
+            self::Active => 'Aktif',
+            self::Inactive => 'Nonaktif',
+            self::Stopped => 'Berhenti',
+            self::Archived => 'Diarsipkan',
+        };
+    }
+
     public function canTransitionTo(self $target): bool
     {
         return match ($this) {

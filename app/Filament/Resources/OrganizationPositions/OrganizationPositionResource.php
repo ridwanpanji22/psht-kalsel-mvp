@@ -17,6 +17,14 @@ class OrganizationPositionResource extends Resource
 {
     protected static ?string $model = OrganizationPosition::class;
 
+    protected static ?string $modelLabel = 'jabatan pengurus';
+
+    protected static ?string $pluralModelLabel = 'jabatan pengurus';
+
+    protected static ?string $navigationLabel = 'Jabatan Pengurus';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Organisasi';
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
 
     public static function form(Schema $schema): Schema

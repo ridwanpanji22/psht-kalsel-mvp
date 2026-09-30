@@ -18,6 +18,14 @@ class MembershipStatusHistoryResource extends Resource
 {
     protected static ?string $model = MembershipStatusHistory::class;
 
+    protected static ?string $modelLabel = 'riwayat status anggota';
+
+    protected static ?string $pluralModelLabel = 'riwayat status anggota';
+
+    protected static ?string $navigationLabel = 'Riwayat Status';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Keanggotaan';
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
 
     public static function form(Schema $schema): Schema

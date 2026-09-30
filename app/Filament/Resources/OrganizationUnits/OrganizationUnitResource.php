@@ -17,6 +17,14 @@ class OrganizationUnitResource extends Resource
 {
     protected static ?string $model = OrganizationUnit::class;
 
+    protected static ?string $modelLabel = 'unit organisasi';
+
+    protected static ?string $pluralModelLabel = 'unit organisasi';
+
+    protected static ?string $navigationLabel = 'Unit Organisasi';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Organisasi';
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
 
     public static function form(Schema $schema): Schema

@@ -20,15 +20,33 @@ class OrganizationUnitsTable
             ))
             ->columns([
                 TextColumn::make('name')->label('Nama')->searchable()->sortable(),
-                TextColumn::make('type')->label('Jenis')->badge(),
+                TextColumn::make('type')
+                    ->label('Jenis')
+                    ->badge()
+                    ->formatStateUsing(fn (mixed $state): string => match (true) {
+                        $state === OrganizationUnitType::Provinsi || $state === 'provinsi' => 'Provinsi',
+                        $state === OrganizationUnitType::Cabang || $state === 'cabang' => 'Cabang',
+                        $state === OrganizationUnitType::Ranting || $state === 'ranting' => 'Ranting',
+                        $state === OrganizationUnitType::Rayon || $state === 'rayon' => 'Rayon',
+                        $state === OrganizationUnitType::Ukm || $state === 'ukm' => 'UKM',
+                        $state === OrganizationUnitType::Komisariat || $state === 'komisariat' => 'Komisariat',
+                        default => (string) $state,
+                    }),
                 TextColumn::make('parent.name')->label('Induk formal')->placeholder('Provinsi'),
                 TextColumn::make('supervisingBranch.name')->label('Cabang pembina')->placeholder('Mandiri'),
             ])
             ->filters([
-                SelectFilter::make('type')->options(collect(OrganizationUnitType::cases())->mapWithKeys(
-                    fn (OrganizationUnitType $type): array => [$type->value => ucfirst($type->value)],
-                )->all()),
+                SelectFilter::make('type')->options([
+                    'provinsi' => 'Provinsi',
+                    'cabang' => 'Cabang',
+                    'ranting' => 'Ranting',
+                    'rayon' => 'Rayon',
+                    'ukm' => 'UKM',
+                    'komisariat' => 'Komisariat',
+                ]),
             ])
+            ->emptyStateHeading('Belum ada unit organisasi')
+            ->emptyStateDescription('Tambahkan unit organisasi dalam cakupan Anda.')
             ->recordActions([
                 EditAction::make(),
             ]);

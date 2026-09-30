@@ -19,6 +19,14 @@ class MembershipResource extends Resource
 {
     protected static ?string $model = Membership::class;
 
+    protected static ?string $modelLabel = 'anggota';
+
+    protected static ?string $pluralModelLabel = 'anggota';
+
+    protected static ?string $navigationLabel = 'Keanggotaan';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Keanggotaan';
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
 
     public static function form(Schema $schema): Schema

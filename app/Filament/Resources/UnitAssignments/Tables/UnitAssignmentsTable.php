@@ -18,10 +18,11 @@ class UnitAssignmentsTable
             ))
             ->columns([
                 TextColumn::make('user.name')->label('Operator')->searchable(),
-                TextColumn::make('user.email')->label('Email')->searchable(),
+                TextColumn::make('user.email')->label('Surel')->searchable(),
                 TextColumn::make('organizationUnit.name')->label('Unit'),
-                TextColumn::make('role')->label('Role')->badge(),
+                TextColumn::make('role')->label('Peran')->badge(),
                 IconColumn::make('is_active')->label('Aktif')->boolean(),
-            ]);
+            ])
+            ->emptyStateHeading('Belum ada penugasan operator');
     }
 }

@@ -22,17 +22,25 @@ class GalleriesTable
             ->columns([
                 TextColumn::make('title')->label('Album')->searchable()->sortable(),
                 TextColumn::make('organizationUnit.name')->label('Unit'),
-                TextColumn::make('status')->label('Status')->badge(),
+                TextColumn::make('status')
+                    ->label('Status')
+                    ->badge()
+                    ->formatStateUsing(fn (mixed $state): string => match (true) {
+                        $state instanceof PublicationStatus => $state->label(),
+                        is_string($state) => PublicationStatus::tryFrom($state)?->label() ?? ucfirst($state),
+                        default => (string) $state,
+                    }),
                 TextColumn::make('published_at')->label('Diterbitkan')->dateTime()->placeholder('Belum'),
             ])
             ->filters([
                 SelectFilter::make('status')->options(collect(PublicationStatus::cases())->mapWithKeys(
-                    fn (PublicationStatus $status): array => [$status->value => ucfirst(str_replace('_', ' ', $status->value))],
+                    fn (PublicationStatus $status): array => [$status->value => $status->label()],
                 )->all()),
                 SelectFilter::make('organization_unit_id')->label('Unit')->options(fn (): array => OrganizationUnit::query()
                     ->whereIn('id', app(OrganizationScope::class)->visibleUnitIds(auth()->user()))
                     ->orderBy('name')->pluck('name', 'id')->all()),
             ])
+            ->emptyStateHeading('Belum ada album')
             ->recordActions([
                 EditAction::make(),
             ]);

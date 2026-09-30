@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\MembershipStatusHistories\Tables;
 
+use App\Enums\MembershipStatus;
 use App\Support\OrganizationScope;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
@@ -17,10 +18,17 @@ class MembershipStatusHistoriesTable
             )))
             ->columns([
                 TextColumn::make('membership.person.name')->label('Anggota'),
-                TextColumn::make('from_status')->label('Dari')->badge(),
-                TextColumn::make('to_status')->label('Ke')->badge(),
+                TextColumn::make('from_status')
+                    ->label('Dari')
+                    ->badge()
+                    ->formatStateUsing(fn (mixed $state): string => $state ? (MembershipStatus::tryFrom((string) $state)?->label() ?? (string) $state) : '—'),
+                TextColumn::make('to_status')
+                    ->label('Ke')
+                    ->badge()
+                    ->formatStateUsing(fn (mixed $state): string => MembershipStatus::tryFrom((string) $state)?->label() ?? (string) $state),
                 TextColumn::make('actor.name')->label('Pelaku'),
                 TextColumn::make('created_at')->label('Waktu')->dateTime(),
-            ]);
+            ])
+            ->emptyStateHeading('Belum ada riwayat status');
     }
 }

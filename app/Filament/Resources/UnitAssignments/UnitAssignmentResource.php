@@ -19,6 +19,14 @@ class UnitAssignmentResource extends Resource
 {
     protected static ?string $model = UnitAssignment::class;
 
+    protected static ?string $modelLabel = 'penugasan operator';
+
+    protected static ?string $pluralModelLabel = 'penugasan operator';
+
+    protected static ?string $navigationLabel = 'Penugasan Operator';
+
+    protected static string|\UnitEnum|null $navigationGroup = 'Akses & Operator';
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
 
     public static function form(Schema $schema): Schema
