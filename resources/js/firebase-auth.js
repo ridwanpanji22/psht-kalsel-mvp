@@ -209,8 +209,9 @@ function initLogin() {
     async function handleAccountExists(error) {
         showMessage('Email ini sudah terdaftar dengan kata sandi. Masukkan kata sandi untuk menautkan akun.', true);
 
-        const { GoogleAuthProvider, signInWithCredential } = await getFirebase();
+        const { GoogleAuthProvider } = await getFirebase();
         const pendingCredential = GoogleAuthProvider.credentialFromError(error);
+        const email = error?.customData?.email || '';
         const password = window.prompt('Masukkan kata sandi akun operator Anda untuk menautkan akun Google:') || '';
 
         if (!password || !pendingCredential) {
@@ -223,11 +224,14 @@ function initLogin() {
             showMessage('Menautkan akun Google...');
 
             const auth = await getClient(currentConfig());
-            const { signInWithEmailAndPassword } = await getFirebase();
-            const credential = await signInWithEmailAndPassword(auth, error.customData?.email || '', password);
+            const { signInWithEmailAndPassword, linkWithCredential } = await getFirebase();
+            const credential = await signInWithEmailAndPassword(auth, email, password);
 
-            await signInWithCredential(auth, pendingCredential);
-            const idToken = await credential.user.getIdToken(true);
+            // Attach the pending Google credential to the freshly password-authenticated
+            // user. Re-attempting a credential sign-in here would fail because the email
+            // is already bound to the password provider; the credential must be linked.
+            const linked = await linkWithCredential(credential.user, pendingCredential);
+            const idToken = await linked.user.getIdToken(true);
 
             await exchangeSession(auth, idToken);
             showMessage('Berhasil masuk. Mengalihkan...');
