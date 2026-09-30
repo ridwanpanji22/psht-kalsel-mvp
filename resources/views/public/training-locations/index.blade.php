@@ -21,6 +21,7 @@
                 @endforeach
             </ul>
             <div id="training-map" class="mt-8 h-96 overflow-hidden rounded-xl border border-stone-200" aria-label="Peta tempat latihan"></div>
+            <p class="mt-2 text-sm text-stone-600">Peta menampilkan titik lokasi latihan. Latar peta dasar belum diaktifkan.</p>
         @endif
     </section>
 @endsection

@@ -31,4 +31,9 @@ class OrganizationUnitPolicy
     {
         return false;
     }
+
+    public function deleteAny(User $user): bool
+    {
+        return false;
+    }
 }

@@ -13,6 +13,8 @@
         <nav class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-4" aria-label="Navigasi utama">
             <a href="{{ route('public.home') }}" class="font-semibold text-emerald-900">PSHT Kalimantan Selatan</a>
             <div class="flex flex-wrap gap-4 text-sm">
+                <a href="{{ route('public.organization.index') }}" class="underline-offset-4 hover:underline">Struktur</a>
+                <a href="{{ route('public.galleries.index') }}" class="underline-offset-4 hover:underline">Galeri</a>
                 <a href="{{ route('public.events.index') }}" class="underline-offset-4 hover:underline">Kegiatan</a>
                 <a href="{{ route('public.training-locations.index') }}" class="underline-offset-4 hover:underline">Tempat latihan</a>
             </div>

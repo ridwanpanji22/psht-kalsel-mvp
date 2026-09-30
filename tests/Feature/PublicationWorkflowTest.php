@@ -38,6 +38,7 @@ class PublicationWorkflowTest extends TestCase
             'title' => 'Sejarah PSHT',
             'body' => '<script>alert(1)</script>Riwayat organisasi.',
             'status' => PublicationStatus::Published,
+            'published_at' => now(),
         ]);
 
         $this->get(route('public.pages.show', $page->slug))

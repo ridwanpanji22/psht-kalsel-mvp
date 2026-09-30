@@ -15,7 +15,18 @@ trait HasPublicationWorkflow
 
     public function scopePublished(Builder $query): Builder
     {
-        return $query->where('status', PublicationStatus::Published);
+        return $query->where('status', PublicationStatus::Published)
+            ->whereNotNull('published_at');
+    }
+
+    public function submittedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'submitted_by_id');
+    }
+
+    public function publishedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'published_by_id');
     }
 
     protected function publicationCasts(): array
