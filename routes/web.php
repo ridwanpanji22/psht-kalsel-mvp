@@ -23,6 +23,8 @@ Route::get('/kegiatan', [EventController::class, 'index'])->name('public.events.
 Route::get('/kegiatan/{slug}', [EventController::class, 'show'])->name('public.events.show');
 Route::get('/tempat-latihan', [TrainingLocationController::class, 'index'])->name('public.training-locations.index');
 
+Route::get('/admin/activate', fn () => view('auth.activate'))->name('auth.activate');
+
 Route::post('/admin/auth/session', FirebaseAuthSessionController::class)->name('auth.firebase.session');
 Route::post('/admin/auth/activate', FirebaseAuthActivationController::class)->name('auth.firebase.activate');
 

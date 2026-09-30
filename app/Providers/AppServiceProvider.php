@@ -28,6 +28,9 @@ use App\Policies\TrainingLocationPolicy;
 use App\Policies\UnitAssignmentPolicy;
 use App\Policies\UserPolicy;
 use App\Services\FirebaseService;
+use Filament\Facades\Filament;
+use Filament\View\PanelsRenderHook;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 use Kreait\Firebase\Factory;
@@ -76,5 +79,12 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(UnitAssignment::class, UnitAssignmentPolicy::class);
         Gate::policy(MembershipStatusHistory::class, MembershipStatusHistoryPolicy::class);
         Gate::policy(User::class, UserPolicy::class);
+
+        Filament::registerRenderHook(
+            PanelsRenderHook::AUTH_LOGIN_FORM_AFTER,
+            fn () => Blade::render(
+                '<div class="text-center mt-4"><p class="text-sm text-gray-500">Atau, <a href="{{ route(\'auth.activate\') }}" class="text-primary-600 hover:underline">aktifkan undangan Anda</a>.</p></div>'
+            )
+        );
     }
 }
