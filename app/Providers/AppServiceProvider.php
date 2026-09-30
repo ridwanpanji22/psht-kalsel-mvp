@@ -14,6 +14,7 @@ use App\Models\OrganizationUnit;
 use App\Models\Page;
 use App\Models\TrainingLocation;
 use App\Models\UnitAssignment;
+use App\Models\User;
 use App\Policies\ApprovalRequestPolicy;
 use App\Policies\EventPolicy;
 use App\Policies\GalleryPolicy;
@@ -25,6 +26,7 @@ use App\Policies\OrganizationUnitPolicy;
 use App\Policies\PagePolicy;
 use App\Policies\TrainingLocationPolicy;
 use App\Policies\UnitAssignmentPolicy;
+use App\Policies\UserPolicy;
 use App\Services\FirebaseService;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
@@ -73,5 +75,6 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(TrainingLocation::class, TrainingLocationPolicy::class);
         Gate::policy(UnitAssignment::class, UnitAssignmentPolicy::class);
         Gate::policy(MembershipStatusHistory::class, MembershipStatusHistoryPolicy::class);
+        Gate::policy(User::class, UserPolicy::class);
     }
 }
