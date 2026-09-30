@@ -11,6 +11,7 @@ use App\OrganizationUnitType;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Validation\ValidationException;
 use Mockery;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -155,7 +156,8 @@ class CreateOperatorActionTest extends TestCase
         }
     }
 
-    public function test_ranting_and_rayon_operators_cannot_invite_any_operator(): void
+    #[DataProvider('subCabangOperatorTypes')]
+    public function test_sub_cabang_operator_cannot_invite_any_operator(OrganizationUnitType $actorUnitType): void
     {
         $provinsi = OrganizationUnit::factory()->create(['type' => OrganizationUnitType::Provinsi]);
         $cabang = OrganizationUnit::factory()->create([
@@ -170,30 +172,41 @@ class CreateOperatorActionTest extends TestCase
             'type' => OrganizationUnitType::Rayon,
             'parent_id' => $ranting->id,
         ]);
+        $actorUnit = $actorUnitType === OrganizationUnitType::Ranting ? $ranting : $rayon;
+        $actor = User::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $actor->id,
+            'organization_unit_id' => $actorUnit->id,
+            'role' => 'operator',
+        ]);
 
         $firebaseMock = Mockery::mock(FirebaseAuthentication::class);
         $firebaseMock->shouldReceive('createUserWithInviteLink')->never();
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
 
-        foreach ([$ranting, $rayon] as $actorUnit) {
-            $actor = User::factory()->create();
-            UnitAssignment::factory()->create([
-                'user_id' => $actor->id,
-                'organization_unit_id' => $actorUnit->id,
-                'role' => 'operator',
+        try {
+            app(CreateOperator::class)->handle($actor, [
+                'email' => 'operator.bawah@gmail.com',
+                'organization_unit_id' => $rayon->id,
             ]);
 
-            $this->expectException(ValidationException::class);
-
-            try {
-                app(CreateOperator::class)->handle($actor, [
-                    'email' => 'operator.bawah@gmail.com',
-                    'organization_unit_id' => $rayon->id,
-                ]);
-            } finally {
-                $this->assertDatabaseMissing('users', ['email' => 'operator.bawah@gmail.com']);
-            }
+            $this->fail("Expected ValidationException for a {$actorUnitType->value} operator.");
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('organization_unit_id', $exception->errors());
         }
+
+        $this->assertDatabaseMissing('users', ['email' => 'operator.bawah@gmail.com']);
+    }
+
+    /**
+     * @return array<string, array{OrganizationUnitType}>
+     */
+    public static function subCabangOperatorTypes(): array
+    {
+        return [
+            'ranting' => [OrganizationUnitType::Ranting],
+            'rayon' => [OrganizationUnitType::Rayon],
+        ];
     }
 
     public function test_rejects_non_gmail_addresses(): void
