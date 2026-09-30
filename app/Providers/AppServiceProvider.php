@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Contracts\FirebaseAuthentication;
 use App\Models\ApprovalRequest;
 use App\Models\Event;
 use App\Models\Gallery;
@@ -24,8 +25,11 @@ use App\Policies\OrganizationUnitPolicy;
 use App\Policies\PagePolicy;
 use App\Policies\TrainingLocationPolicy;
 use App\Policies\UnitAssignmentPolicy;
+use App\Services\FirebaseService;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
+use Kreait\Firebase\Factory;
+use Throwable;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -34,7 +38,23 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(FirebaseAuthentication::class, function ($app): FirebaseService {
+            try {
+                $factory = new Factory;
+
+                $credentialsPath = config('services.firebase.credentials');
+
+                if (is_string($credentialsPath) && $credentialsPath !== '' && file_exists($credentialsPath)) {
+                    $factory = $factory->withServiceAccount($credentialsPath);
+                }
+
+                return new FirebaseService($factory->createAuth());
+            } catch (Throwable) {
+                // Credentials are not resolvable yet (e.g. local CLI); fall back to
+                // lazy container resolution so the app does not fail to boot.
+                return new FirebaseService;
+            }
+        });
     }
 
     /**
