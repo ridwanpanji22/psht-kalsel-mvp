@@ -1,7 +1,22 @@
 <?php
 
+use App\Http\Controllers\PrivateMediaController;
+use App\Http\Controllers\Public\EventController;
+use App\Http\Controllers\Public\PageController;
+use App\Http\Controllers\Public\TrainingLocationController;
+use App\Http\Controllers\PublishedContentController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return view('welcome');
-});
+Route::view('/', 'public.home')->name('public.home');
+Route::get('/profil/{slug}', [PageController::class, 'show'])->name('public.pages.show');
+Route::get('/kegiatan', [EventController::class, 'index'])->name('public.events.index');
+Route::get('/kegiatan/{slug}', [EventController::class, 'show'])->name('public.events.show');
+Route::get('/tempat-latihan', [TrainingLocationController::class, 'index'])->name('public.training-locations.index');
+
+Route::post('/admin/pages/{page}/submit-for-review', [PublishedContentController::class, 'store'])
+    ->middleware('auth')
+    ->name('pages.submit-for-review');
+Route::get('/admin/media/{media}', [PrivateMediaController::class, 'show'])->name('media.show');
+Route::post('/admin/media', [PrivateMediaController::class, 'store'])
+    ->middleware('auth')
+    ->name('media.store');
