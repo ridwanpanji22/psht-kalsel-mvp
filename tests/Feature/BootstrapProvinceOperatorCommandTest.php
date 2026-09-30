@@ -25,7 +25,7 @@ class BootstrapProvinceOperatorCommandTest extends TestCase
         $firebaseMock->shouldReceive('createUserWithInviteLink')
             ->once()
             ->with('admin.provinsi@gmail.com')
-            ->andReturn(['uid' => 'fb_uid_bootstrap_123', 'sign_in_link' => 'https://bootstrap.link']);
+            ->andReturn(['uid' => 'fb_uid_bootstrap_123']);
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
 
         $this->artisan('operators:bootstrap-province', ['email' => 'admin.provinsi@gmail.com'])

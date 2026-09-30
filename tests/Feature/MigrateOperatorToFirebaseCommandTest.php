@@ -39,7 +39,7 @@ class MigrateOperatorToFirebaseCommandTest extends TestCase
         $firebaseMock->shouldReceive('createUserWithInviteLink')
             ->once()
             ->with('operator.lama@gmail.com')
-            ->andReturn(['uid' => 'fb_uid_migrated_456', 'sign_in_link' => 'https://migrate.link']);
+            ->andReturn(['uid' => 'fb_uid_migrated_456']);
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
 
         $this->artisan('operators:migrate-firebase', ['email' => 'operator.lama@gmail.com'])

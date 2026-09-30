@@ -17,16 +17,42 @@ class UnitScopeAuthorizationTest extends TestCase
 
     public function test_only_active_assigned_operators_can_access_admin_panel(): void
     {
-        $activeOperator = User::factory()->create();
+        $activeOperator = User::factory()->onboarded()->create();
         $unit = OrganizationUnit::factory()->create();
         UnitAssignment::factory()->create([
             'user_id' => $activeOperator->id,
             'organization_unit_id' => $unit->id,
         ]);
-        $inactiveOperator = User::factory()->inactive()->create();
+        $inactiveOperator = User::factory()->onboarded()->inactive()->create();
 
         $this->assertTrue($activeOperator->canAccessPanel(Panel::make()));
         $this->assertFalse($inactiveOperator->canAccessPanel(Panel::make()));
+    }
+
+    public function test_active_assigned_operator_without_onboarding_cannot_access_admin_panel(): void
+    {
+        $operator = User::factory()->create(['onboarded_at' => null]);
+        $unit = OrganizationUnit::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $unit->id,
+            'is_active' => true,
+        ]);
+
+        $this->assertFalse($operator->canAccessPanel(Panel::make()));
+    }
+
+    public function test_active_assigned_onboarded_operator_can_access_admin_panel(): void
+    {
+        $operator = User::factory()->onboarded()->create();
+        $unit = OrganizationUnit::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $unit->id,
+            'is_active' => true,
+        ]);
+
+        $this->assertTrue($operator->canAccessPanel(Panel::make()));
     }
 
     public function test_operator_scope_includes_formal_descendants_but_not_siblings_or_supervised_units(): void

@@ -352,6 +352,57 @@ class FirebaseAuthEndpointsTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_session_endpoint_throttles_after_five_unknown_token_attempts(): void
+    {
+        $this->resetAuthRateLimiters();
+
+        // Five unknown-token attempts are processed (403); the sixth is throttled (429).
+        $this->fakeFirebaseToken('unknown_uid_token', [
+            'uid' => 'fb_uid_does_not_exist',
+            'email' => 'asing.tanpa.uid@gmail.com',
+            'email_verified' => true,
+        ]);
+
+        for ($attempt = 1; $attempt <= 5; $attempt++) {
+            $this->postJson('/admin/auth/session', ['id_token' => 'unknown_uid_token'])
+                ->assertStatus(403);
+        }
+
+        $this->postJson('/admin/auth/session', ['id_token' => 'unknown_uid_token'])
+            ->assertStatus(429);
+    }
+
+    public function test_activate_endpoint_throttles_after_five_unknown_token_attempts(): void
+    {
+        $this->resetAuthRateLimiters();
+
+        $this->fakeFirebaseToken('unverified_token', [
+            'uid' => 'fb_uid_unverified',
+            'email' => 'belum.verifikasi@gmail.com',
+            'email_verified' => false,
+        ]);
+
+        for ($attempt = 1; $attempt <= 5; $attempt++) {
+            $this->postJson('/admin/auth/activate', [
+                'id_token' => 'unverified_token',
+                'name' => 'Nama Operator Resmi',
+            ])->assertStatus(403);
+        }
+
+        $this->postJson('/admin/auth/activate', [
+            'id_token' => 'unverified_token',
+            'name' => 'Nama Operator Resmi',
+        ])->assertStatus(429);
+    }
+
+    /**
+     * Clear the array rate-limiter buckets so throttle assertions are deterministic.
+     */
+    private function resetAuthRateLimiters(): void
+    {
+        $this->app->make('cache')->store()->flush();
+    }
+
     /**
      * Bind a Firebase double that resolves the given token to the given claims.
      *
@@ -361,7 +412,6 @@ class FirebaseAuthEndpointsTest extends TestCase
     {
         $firebase = Mockery::mock(FirebaseAuthentication::class);
         $firebase->shouldReceive('verifyIdToken')
-            ->once()
             ->with($idToken)
             ->andReturn($claims);
 

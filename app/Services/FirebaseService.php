@@ -31,11 +31,13 @@ class FirebaseService implements FirebaseAuthentication
                 'handleCodeInApp' => true,
             ];
 
-            $signInLink = $auth->getSignInWithEmailLink($email, $actionCodeSettings);
+            // Ask Firebase to generate AND email the sign-in link to the invitee in
+            // Indonesian. Unlike getSignInWithEmailLink(), this performs the actual
+            // delivery, so the invite is genuinely sent rather than silently discarded.
+            $auth->sendSignInWithEmailLink($email, $actionCodeSettings, 'id');
 
             return [
                 'uid' => $userRecord->uid,
-                'sign_in_link' => $signInLink,
             ];
         } catch (AuthException|FirebaseException $e) {
             throw new RuntimeException('Gagal memproses akun Firebase: '.$e->getMessage(), 0, $e);
@@ -66,7 +68,10 @@ class FirebaseService implements FirebaseAuthentication
             return $this->auth;
         }
 
-        // Resolve from container; must be bound in AppServiceProvider.
-        return app(FirebaseAuthContract::class);
+        // No client was injected because AppServiceProvider could not build one from
+        // config('services.firebase.credentials'). Surface an actionable, localized
+        // error instead of falling back to container resolution, which would fail with
+        // an opaque binding exception when the credential file is absent.
+        throw new RuntimeException('Kredensial Firebase belum dikonfigurasi di FIREBASE_CREDENTIALS.');
     }
 }

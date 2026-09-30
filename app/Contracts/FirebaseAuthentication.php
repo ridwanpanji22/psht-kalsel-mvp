@@ -5,7 +5,12 @@ namespace App\Contracts;
 interface FirebaseAuthentication
 {
     /**
-     * @return array{uid: string, sign_in_link: string}
+     * Create the Firebase identity and trigger the invite email-link delivery.
+     *
+     * The invite link is generated and sent by Firebase directly to the target
+     * address; it is deliberately never returned to the caller.
+     *
+     * @return array{uid: string}
      */
     public function createUserWithInviteLink(string $email): array;
 

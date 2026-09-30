@@ -66,6 +66,30 @@
                 <span>Masuk dengan Google</span>
             </button>
 
+            <section id="link-password-section" class="mt-6 hidden rounded-lg border border-amber-300 bg-amber-50 p-4" aria-labelledby="link-password-heading">
+                <h2 id="link-password-heading" class="text-sm font-semibold text-amber-900">Tautkan akun Google</h2>
+                <p class="mt-1 text-sm text-amber-800">Email ini sudah terdaftar dengan kata sandi. Masukkan kata sandi akun operator Anda untuk menautkan akun Google ini.</p>
+
+                <form id="link-password-form" class="mt-4 space-y-4" novalidate>
+                    <div>
+                        <label for="link-password" class="block text-sm font-medium text-stone-700">Kata Sandi Akun Operator</label>
+                        <input id="link-password" name="link_password" type="password" required autocomplete="current-password"
+                            class="mt-1 block w-full rounded-md border border-stone-300 px-3 py-2 shadow-sm focus:border-emerald-700 focus:outline-none focus:ring-1 focus:ring-emerald-700">
+                    </div>
+
+                    <div class="flex flex-wrap gap-3">
+                        <button type="submit" id="link-google-submit"
+                            class="inline-flex items-center justify-center rounded-md bg-emerald-800 px-5 py-2.5 font-medium text-white hover:bg-emerald-900 focus:outline-2 focus:outline-offset-2 focus:outline-emerald-800 disabled:opacity-60">
+                            Tautkan &amp; Masuk
+                        </button>
+                        <button type="button" id="link-google-cancel"
+                            class="inline-flex items-center justify-center rounded-md border border-stone-300 bg-white px-5 py-2.5 font-medium hover:bg-stone-100 focus:outline-2 focus:outline-offset-2 focus:outline-emerald-800">
+                            Batal
+                        </button>
+                    </div>
+                </form>
+            </section>
+
             {!! FilamentView::renderHook(PanelsRenderHook::AUTH_LOGIN_FORM_AFTER, scopes: $this->getRenderHookScopes()) !!}
         </section>
     </main>

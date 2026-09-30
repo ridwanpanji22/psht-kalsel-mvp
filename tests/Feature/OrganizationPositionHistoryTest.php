@@ -17,7 +17,7 @@ class OrganizationPositionHistoryTest extends TestCase
     public function test_operator_can_open_organization_positions_index(): void
     {
         $unit = OrganizationUnit::factory()->create();
-        $operator = User::factory()->create();
+        $operator = User::factory()->onboarded()->create();
         UnitAssignment::factory()->create([
             'user_id' => $operator->id,
             'organization_unit_id' => $unit->id,

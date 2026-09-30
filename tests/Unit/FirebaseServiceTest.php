@@ -14,7 +14,7 @@ use Tests\TestCase;
 
 class FirebaseServiceTest extends TestCase
 {
-    public function test_creates_user_and_generates_sign_in_link(): void
+    public function test_creates_user_and_sends_sign_in_email_link_in_indonesian(): void
     {
         $firebaseAuth = Mockery::mock(FirebaseAuthContract::class);
         $userRecord = new UserRecord(
@@ -43,16 +43,32 @@ class FirebaseServiceTest extends TestCase
                 && $arg['disabled'] === false))
             ->andReturn($userRecord);
 
-        $firebaseAuth->shouldReceive('getSignInWithEmailLink')
+        // The invite must be SENT by the Admin SDK with the Indonesian locale, never
+        // merely generated locally (which would leave the email unsent).
+        $firebaseAuth->shouldReceive('sendSignInWithEmailLink')
             ->once()
-            ->with('operator@gmail.com', Mockery::type('array'))
-            ->andReturn('https://pengprov-psht-kalsel.firebaseapp.com/__/auth/action?apiKey=test');
+            ->with('operator@gmail.com', Mockery::type('array'), 'id')
+            ->andReturnNull();
+
+        $firebaseAuth->shouldNotReceive('getSignInWithEmailLink');
 
         $service = new FirebaseService($firebaseAuth);
         $result = $service->createUserWithInviteLink('operator@gmail.com');
 
-        $this->assertSame('firebase_user_abc_123', $result['uid']);
-        $this->assertStringContainsString('https://', $result['sign_in_link']);
+        $this->assertSame(['uid' => 'firebase_user_abc_123'], $result);
+    }
+
+    public function test_throws_clear_runtime_exception_when_firebase_credentials_missing(): void
+    {
+        // A service constructed without an injected client (the AppServiceProvider
+        // fallback when credentials are absent) must fail with an actionable message
+        // instead of attempting container resolution.
+        $service = new FirebaseService;
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Kredensial Firebase belum dikonfigurasi di FIREBASE_CREDENTIALS.');
+
+        $service->createUserWithInviteLink('operator@gmail.com');
     }
 
     public function test_verifies_id_token_successfully(): void

@@ -11,10 +11,36 @@ Requirements: PHP 8.3+, Composer, Node.js/npm, and MySQL 8 for configured applic
 3. Set `DB_CONNECTION=mysql`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD` in your local `.env`.
 4. Install dependencies/build assets if not already installed: `composer install && npm install && npm run build`.
 5. Run `php artisan migrate` after MySQL is available.
-6. Create the initial operator in Tinker or through your approved provisioning process; never expose public registration. Operator panel access requires an active user with an active unit assignment.
-7. Start locally with `composer run dev` and open the URL printed by Laravel.
+6. **Configure Firebase Admin credentials.** Store the service account JSON **outside the repository** (e.g. `~/secrets/firebase-service-account.json` or a path under `storage/` that is never committed) and point `FIREBASE_CREDENTIALS` at that absolute path. Do not commit the key, and do not place it inside the project tree. Set `FIREBASE_PROJECT_ID` to the same project.
+7. **Configure all Firebase Web (client) settings.** Fill every `VITE_FIREBASE_*` variable — `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, and `VITE_FIREBASE_APP_ID`. These are public values embedded in the login/activation pages and rebuild with `npm run build`. Missing values leave the operator login with “Konfigurasi Firebase belum tersedia”.
+8. **Enable the Firebase providers.** In the Firebase Console enable the **Email Link (passwordless sign-in)** and **Google** sign-in providers, and add every host that serves `/admin/login` and `/admin/activate` to **Authentication → Settings → Authorized domains** (include `localhost` for local work). Email Link invites are sent by the Admin SDK in Indonesian (`locale = 'id'`).
+9. **Create the initial operator** (not via Tinker) with the province bootstrap command:
+
+   ```bash
+   php artisan operators:bootstrap-province admin@gmail.com
+   ```
+
+   It provisions the first active Province operator and emails the activation invite.
+10. **Migrate a legacy operator** (existing local account without a Firebase identity) with:
+
+    ```bash
+    php artisan operators:migrate-firebase operator@gmail.com
+    ```
+
+11. Start locally with `composer run dev` and open the URL printed by Laravel.
+
+Panel access requires an active user with an active unit assignment **and** a completed onboarding (`onboarded_at`). Operator login itself remains blocked locally until the replacement service-account key and web configuration above are in place (see the note below).
 
 For isolated local work before MySQL exists, `.env` may use SQLite. Automated tests use `DB_CONNECTION=sqlite`, `DB_DATABASE=:memory:` from `phpunit.xml`; tests do not read/write production DB.
+
+### Operator login/activation smoke is blocked until credentials are replaced
+
+A previously exposed service-account key was revoked, and no replacement key or Firebase web configuration is present in this environment. Until a **new service-account key** (path configured outside the repo via `FIREBASE_CREDENTIALS`) and the complete `VITE_FIREBASE_*` web settings are supplied:
+
+- the invite emails from the bootstrap/migration commands cannot be sent, and
+- the end-to-end login/activation browser smoke cannot be completed.
+
+This is an environment prerequisite, not a code defect. Tests mock the Firebase boundary and do not require real credentials.
 
 ## Verification
 

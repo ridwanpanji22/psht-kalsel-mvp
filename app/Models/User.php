@@ -29,6 +29,7 @@ class User extends Authenticatable implements FilamentUser
     public function canAccessPanel(Panel $panel): bool
     {
         return $this->is_active
+            && $this->isOnboarded()
             && $this->unitAssignments()->where('is_active', true)->exists();
     }
 

@@ -25,8 +25,12 @@ Route::get('/tempat-latihan', [TrainingLocationController::class, 'index'])->nam
 
 Route::get('/admin/activate', fn () => view('auth.activate'))->name('auth.activate');
 
-Route::post('/admin/auth/session', FirebaseAuthSessionController::class)->name('auth.firebase.session');
-Route::post('/admin/auth/activate', FirebaseAuthActivationController::class)->name('auth.firebase.activate');
+Route::post('/admin/auth/session', FirebaseAuthSessionController::class)
+    ->middleware('throttle:5,1')
+    ->name('auth.firebase.session');
+Route::post('/admin/auth/activate', FirebaseAuthActivationController::class)
+    ->middleware('throttle:5,1')
+    ->name('auth.firebase.activate');
 
 Route::post('/admin/pages/{page}/submit-for-review', [PublishedContentController::class, 'store'])
     ->middleware('auth')

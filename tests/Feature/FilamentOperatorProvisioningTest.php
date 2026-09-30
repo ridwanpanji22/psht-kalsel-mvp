@@ -34,7 +34,7 @@ class FilamentOperatorProvisioningTest extends TestCase
         $firebaseMock->shouldReceive('createUserWithInviteLink')
             ->once()
             ->with('operator.baru@gmail.com')
-            ->andReturn(['uid' => 'fb_uid_panel_123', 'sign_in_link' => 'https://test.link']);
+            ->andReturn(['uid' => 'fb_uid_panel_123']);
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
 
         Livewire::test(CreateUser::class)
@@ -75,7 +75,7 @@ class FilamentOperatorProvisioningTest extends TestCase
         $firebaseMock->shouldReceive('createUserWithInviteLink')
             ->once()
             ->with('ranting.baru@gmail.com')
-            ->andReturn(['uid' => 'fb_uid_ranting_456', 'sign_in_link' => 'https://test.link']);
+            ->andReturn(['uid' => 'fb_uid_ranting_456']);
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
 
         Livewire::test(CreateUser::class)

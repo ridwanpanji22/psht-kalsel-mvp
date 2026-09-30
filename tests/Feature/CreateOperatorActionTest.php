@@ -34,7 +34,7 @@ class CreateOperatorActionTest extends TestCase
         $firebaseMock->shouldReceive('createUserWithInviteLink')
             ->once()
             ->with('calon.ranting@gmail.com')
-            ->andReturn(['uid' => 'fb_uid_999', 'sign_in_link' => 'https://test.link']);
+            ->andReturn(['uid' => 'fb_uid_999']);
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
 
         $created = app(CreateOperator::class)->handle($actor, [
@@ -89,7 +89,6 @@ class CreateOperatorActionTest extends TestCase
         $firebaseMock->shouldReceive('createUserWithInviteLink')
             ->andReturnUsing(fn (string $email): array => [
                 'uid' => 'fb_uid_'.md5($email),
-                'sign_in_link' => 'https://test.link/'.$email,
             ]);
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
 
@@ -288,7 +287,7 @@ class CreateOperatorActionTest extends TestCase
                 $this->assertSame(1, $pending->unitAssignments()->count());
                 $this->assertDatabaseHas('audit_events', ['action' => 'operator.invitation_requested', 'subject_id' => $pending->id]);
 
-                return ['uid' => 'fb_uid_saga', 'sign_in_link' => 'https://test.link'];
+                return ['uid' => 'fb_uid_saga'];
             });
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
 

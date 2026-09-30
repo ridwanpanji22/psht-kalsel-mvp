@@ -115,6 +115,13 @@ async function exchangeSession(auth, idToken) {
     return postJson(SESSION_ENDPOINT, { id_token: token, _token: csrfToken() });
 }
 
+/**
+ * Pending credential for the `auth/account-exists-with-different-credential` recovery
+ * path. Held in module memory only — never in the DOM, storage, or a prompt — and cleared
+ * on success, cancel, or failure so it cannot be replayed.
+ */
+let pendingLinkCredential = null;
+
 function initLogin() {
     const container = document.querySelector('[data-firebase-login]');
 
@@ -126,9 +133,14 @@ function initLogin() {
     const form = document.getElementById('login-form');
     const googleButton = document.getElementById('google-login-button');
     const submitButton = document.getElementById('login-submit-button');
+    const linkSection = document.getElementById('link-password-section');
+    const linkForm = document.getElementById('link-password-form');
+    const linkPasswordInput = document.getElementById('link-password');
+    const linkSubmitButton = document.getElementById('link-google-submit');
+    const linkCancelButton = document.getElementById('link-google-cancel');
 
     const busy = (isBusy) => {
-        for (const button of [submitButton, googleButton]) {
+        for (const button of [submitButton, googleButton, linkSubmitButton, linkCancelButton]) {
             if (!button) {
                 continue;
             }
@@ -138,6 +150,21 @@ function initLogin() {
             } else {
                 button.removeAttribute('disabled');
             }
+        }
+    };
+
+    const showLinkSection = () => {
+        linkSection?.classList.remove('hidden');
+        if (linkPasswordInput) {
+            linkPasswordInput.value = '';
+            linkPasswordInput.focus();
+        }
+    };
+
+    const hideLinkSection = () => {
+        linkSection?.classList.add('hidden');
+        if (linkPasswordInput) {
+            linkPasswordInput.value = '';
         }
     };
 
@@ -185,7 +212,7 @@ function initLogin() {
             showMessage('Membuka jendela masuk Google...');
 
             const auth = await getClient(currentConfig());
-            const { GoogleAuthProvider, signInWithPopup, fetchSignInMethodsForEmail } = await getFirebase();
+            const { GoogleAuthProvider, signInWithPopup } = await getFirebase();
             const provider = new GoogleAuthProvider();
 
             const result = await signInWithPopup(auth, provider);
@@ -196,7 +223,7 @@ function initLogin() {
             window.location.href = REDIRECT_URL;
         } catch (error) {
             if (error?.code === 'auth/account-exists-with-different-credential') {
-                await handleAccountExists(error);
+                await startAccountExistsRecovery(error);
 
                 return;
             }
@@ -206,40 +233,80 @@ function initLogin() {
         }
     });
 
-    async function handleAccountExists(error) {
-        showMessage('Email ini sudah terdaftar dengan kata sandi. Masukkan kata sandi untuk menautkan akun.', true);
-
+    async function startAccountExistsRecovery(error) {
         const { GoogleAuthProvider } = await getFirebase();
-        const pendingCredential = GoogleAuthProvider.credentialFromError(error);
-        const email = error?.customData?.email || '';
-        const password = window.prompt('Masukkan kata sandi akun operator Anda untuk menautkan akun Google:') || '';
+        // Keep the pending Google credential in module memory only. A page-level prompt
+        // or hidden field would leak it into the DOM or block the UI thread.
+        pendingLinkCredential = GoogleAuthProvider.credentialFromError(error);
 
-        if (!password || !pendingCredential) {
+        if (!pendingLinkCredential) {
+            pendingLinkCredential = null;
             busy(false);
+            showMessage(firebaseErrorMessage(error), true);
+
+            return;
+        }
+
+        busy(false);
+        showMessage('Email ini sudah terdaftar dengan kata sandi. Masukkan kata sandi untuk menautkan akun.', true);
+        showLinkSection();
+    }
+
+    linkForm?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const password = linkPasswordInput?.value || '';
+
+        if (!password) {
+            showMessage('Kata sandi wajib diisi untuk menautkan akun.', true);
+
+            return;
+        }
+
+        if (!pendingLinkCredential) {
+            hideLinkSection();
+            showMessage('Sesi penautan tidak ditemukan. Silakan ulangi masuk dengan Google.', true);
 
             return;
         }
 
         try {
+            busy(true);
             showMessage('Menautkan akun Google...');
 
             const auth = await getClient(currentConfig());
             const { signInWithEmailAndPassword, linkWithCredential } = await getFirebase();
-            const credential = await signInWithEmailAndPassword(auth, email, password);
+            const credential = await signInWithEmailAndPassword(auth, emailForPendingLink(), password);
 
             // Attach the pending Google credential to the freshly password-authenticated
             // user. Re-attempting a credential sign-in here would fail because the email
             // is already bound to the password provider; the credential must be linked.
-            const linked = await linkWithCredential(credential.user, pendingCredential);
+            const linked = await linkWithCredential(credential.user, pendingLinkCredential);
             const idToken = await linked.user.getIdToken(true);
+
+            pendingLinkCredential = null;
+            hideLinkSection();
 
             await exchangeSession(auth, idToken);
             showMessage('Berhasil masuk. Mengalihkan...');
             window.location.href = REDIRECT_URL;
         } catch (linkError) {
             busy(false);
+            pendingLinkCredential = null;
+            hideLinkSection();
             showMessage(firebaseErrorMessage(linkError), true);
         }
+    });
+
+    linkCancelButton?.addEventListener('click', () => {
+        pendingLinkCredential = null;
+        hideLinkSection();
+        busy(false);
+        showMessage('Penautan akun Google dibatalkan.', true);
+    });
+
+    function emailForPendingLink() {
+        return document.getElementById('input-email')?.value.trim() || '';
     }
 }
 
