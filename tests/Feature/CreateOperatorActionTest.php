@@ -263,7 +263,45 @@ class CreateOperatorActionTest extends TestCase
         ]);
     }
 
-    public function test_rolls_back_database_if_firebase_call_fails(): void
+    public function test_persists_inactive_pending_record_before_calling_firebase(): void
+    {
+        $provinsi = OrganizationUnit::factory()->create(['type' => OrganizationUnitType::Provinsi]);
+        $ranting = OrganizationUnit::factory()->create(['type' => OrganizationUnitType::Ranting]);
+        $actor = User::factory()->create();
+        UnitAssignment::factory()->create([
+            'user_id' => $actor->id,
+            'organization_unit_id' => $provinsi->id,
+            'role' => 'operator',
+        ]);
+
+        // Stage 1 must commit the pending local record *before* the Firebase network call so a
+        // saga retry can reuse it instead of creating a duplicate account.
+        $firebaseMock = Mockery::mock(FirebaseAuthentication::class);
+        $firebaseMock->shouldReceive('createUserWithInviteLink')
+            ->once()
+            ->with('saga.operator@gmail.com')
+            ->andReturnUsing(function (string $email): array {
+                $pending = User::query()->where('email', $email)->first();
+                $this->assertNotNull($pending, 'Pending user must exist before the Firebase call.');
+                $this->assertFalse($pending->is_active);
+                $this->assertNull($pending->firebase_uid);
+                $this->assertSame(1, $pending->unitAssignments()->count());
+                $this->assertDatabaseHas('audit_events', ['action' => 'operator.invitation_requested', 'subject_id' => $pending->id]);
+
+                return ['uid' => 'fb_uid_saga', 'sign_in_link' => 'https://test.link'];
+            });
+        $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
+
+        $created = app(CreateOperator::class)->handle($actor, [
+            'email' => 'saga.operator@gmail.com',
+            'organization_unit_id' => $ranting->id,
+        ]);
+
+        $this->assertSame('fb_uid_saga', $created->firebase_uid);
+        $this->assertDatabaseHas('audit_events', ['action' => 'operator.invited', 'subject_id' => $created->id]);
+    }
+
+    public function test_keeps_inactive_pending_record_when_firebase_call_fails(): void
     {
         $provinsi = OrganizationUnit::factory()->create(['type' => OrganizationUnitType::Provinsi]);
         $ranting = OrganizationUnit::factory()->create(['type' => OrganizationUnitType::Ranting]);
@@ -292,9 +330,26 @@ class CreateOperatorActionTest extends TestCase
             $this->assertSame('Firebase down', $exception->getMessage());
         }
 
-        $this->assertDatabaseMissing('users', ['email' => 'gagal.firebase@gmail.com']);
-        $this->assertDatabaseMissing('unit_assignments', [
+        // The saga keeps the pending record inactive (never rolled back) so it can be retried
+        // without creating a duplicate Firebase identity.
+        $pending = User::query()->where('email', 'gagal.firebase@gmail.com')->first();
+        $this->assertNotNull($pending);
+        $this->assertNull($pending->firebase_uid);
+        $this->assertFalse($pending->is_active);
+        $this->assertNull($pending->onboarded_at);
+
+        $this->assertDatabaseHas('unit_assignments', [
+            'user_id' => $pending->id,
             'organization_unit_id' => $ranting->id,
+            'is_active' => false,
+        ]);
+        $this->assertDatabaseHas('audit_events', [
+            'action' => 'operator.invitation_requested',
+            'subject_id' => $pending->id,
+        ]);
+        $this->assertDatabaseMissing('audit_events', [
+            'action' => 'operator.invited',
+            'subject_id' => $pending->id,
         ]);
     }
 }

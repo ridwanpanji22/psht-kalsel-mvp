@@ -10,6 +10,7 @@ use App\Models\User;
 use App\OrganizationUnitType;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -60,44 +61,57 @@ class BootstrapProvinceOperator extends Command
             return self::FAILURE;
         }
 
+        // Stage 1: durably record the pending invitation before any network call, so a
+        // Firebase failure leaves an inactive record that a retry can reuse.
+        $user = DB::transaction(function () use ($email, $provinsi): User {
+            $user = User::query()->create([
+                'name' => null,
+                'email' => $email,
+                'password' => Str::random(32),
+                'is_active' => false,
+                'onboarded_at' => null,
+            ]);
+
+            UnitAssignment::query()->create([
+                'user_id' => $user->id,
+                'organization_unit_id' => $provinsi->id,
+                'role' => 'operator',
+                'is_active' => false,
+            ]);
+
+            return $user;
+        });
+
+        // Stage 2: Firebase Admin network call, outside any database transaction.
         try {
-            DB::transaction(function () use ($email, $provinsi, $firebase): void {
-                $user = User::query()->create([
-                    'name' => null,
-                    'email' => $email,
-                    'password' => Str::random(32),
-                    'is_active' => false,
-                    'onboarded_at' => null,
-                ]);
+            $firebaseResult = $firebase->createUserWithInviteLink($email);
+        } catch (Throwable $exception) {
+            Log::error('Gagal memproses undangan bootstrap Operator Provinsi.', [
+                'email' => $email,
+                'error' => $exception->getMessage(),
+            ]);
 
-                UnitAssignment::query()->create([
-                    'user_id' => $user->id,
-                    'organization_unit_id' => $provinsi->id,
-                    'role' => 'operator',
-                    'is_active' => false,
-                ]);
-
-                $firebaseResult = $firebase->createUserWithInviteLink($email);
-
-                $user->update(['firebase_uid' => $firebaseResult['uid']]);
-
-                AuditEvent::query()->create([
-                    'actor_id' => null,
-                    'subject_type' => $user->getMorphClass(),
-                    'subject_id' => $user->id,
-                    'action' => 'operator.bootstrapped',
-                    'metadata' => [
-                        'email' => $email,
-                        'organization_unit_id' => $provinsi->id,
-                        'firebase_uid' => $firebaseResult['uid'],
-                    ],
-                ]);
-            });
-        } catch (Throwable) {
             $this->error('Gagal mengirim undangan Firebase.');
 
             return self::FAILURE;
         }
+
+        // Stage 3: bind the Firebase identity and record the completed bootstrap.
+        DB::transaction(function () use ($user, $email, $provinsi, $firebaseResult): void {
+            $user->update(['firebase_uid' => $firebaseResult['uid']]);
+
+            AuditEvent::query()->create([
+                'actor_id' => null,
+                'subject_type' => $user->getMorphClass(),
+                'subject_id' => $user->id,
+                'action' => 'operator.bootstrapped',
+                'metadata' => [
+                    'email' => $email,
+                    'organization_unit_id' => $provinsi->id,
+                    'firebase_uid' => $firebaseResult['uid'],
+                ],
+            ]);
+        });
 
         $this->info("Undangan aktivasi berhasil dikirimkan ke {$email}.");
 

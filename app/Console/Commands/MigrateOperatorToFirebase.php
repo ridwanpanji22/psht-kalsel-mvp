@@ -7,6 +7,7 @@ use App\Models\AuditEvent;
 use App\Models\User;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class MigrateOperatorToFirebase extends Command
@@ -62,7 +63,12 @@ class MigrateOperatorToFirebase extends Command
                     ],
                 ]);
             });
-        } catch (Throwable) {
+        } catch (Throwable $exception) {
+            Log::error('Gagal memproses undangan migrasi Firebase.', [
+                'email' => $email,
+                'error' => $exception->getMessage(),
+            ]);
+
             $this->error('Gagal mengirim undangan migrasi Firebase.');
 
             return self::FAILURE;

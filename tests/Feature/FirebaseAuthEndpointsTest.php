@@ -8,6 +8,7 @@ use App\Models\UnitAssignment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Mockery;
+use RuntimeException;
 use Tests\TestCase;
 
 class FirebaseAuthEndpointsTest extends TestCase
@@ -118,7 +119,9 @@ class FirebaseAuthEndpointsTest extends TestCase
             'name' => 'Nama Baru Tidak Terpakai',
         ]);
 
-        $response->assertStatus(400);
+        // Re-activation of an already-onboarded account is a forbidden operation (403),
+        // not a malformed request (400).
+        $response->assertStatus(403);
         $response->assertJson(['error' => 'Akun ini sudah pernah diaktivasi sebelumnya.']);
         $this->assertGuest();
 
@@ -138,11 +141,96 @@ class FirebaseAuthEndpointsTest extends TestCase
             'name' => 'Nama Operator Resmi',
         ]);
 
-        $response->assertStatus(404);
+        // An identity that was never invited cannot be activated: forbidden (403).
+        $response->assertStatus(403);
         $response->assertJson(['error' => 'Undangan aktivasi tidak ditemukan.']);
         $this->assertGuest();
 
         $this->assertDatabaseMissing('users', ['email' => 'tidak.dikenal@gmail.com']);
+    }
+
+    public function test_activate_endpoint_rejects_token_email_mismatch_for_bound_uid(): void
+    {
+        // The Firebase UID is bound to a local operator, but the verified token carries a
+        // different email. The lookup must not treat them as the same identity.
+        $user = User::factory()->create([
+            'name' => null,
+            'email' => 'pemilik.asli@gmail.com',
+            'firebase_uid' => 'fb_uid_bound_owner',
+            'is_active' => false,
+            'onboarded_at' => null,
+        ]);
+
+        $this->fakeFirebaseToken('mismatched_email_token', [
+            'uid' => 'fb_uid_bound_owner',
+            'email' => 'penyerang.lain@gmail.com',
+            'email_verified' => true,
+        ]);
+
+        $response = $this->postJson('/admin/auth/activate', [
+            'id_token' => 'mismatched_email_token',
+            'name' => 'Nama Penyerang',
+        ]);
+
+        $response->assertStatus(403);
+        $response->assertJson(['error' => 'Undangan aktivasi tidak ditemukan.']);
+        $this->assertGuest();
+
+        $user->refresh();
+        $this->assertNull($user->name);
+        $this->assertNull($user->onboarded_at);
+        $this->assertFalse($user->is_active);
+    }
+
+    public function test_activate_endpoint_does_not_bind_uid_to_unrelated_pending_email(): void
+    {
+        // A pending invite exists for another address; a token must not be able to claim it
+        // by presenting a UID whose verified email differs from the invited email.
+        $pending = User::factory()->create([
+            'name' => null,
+            'email' => 'diundang@gmail.com',
+            'firebase_uid' => null,
+            'is_active' => false,
+            'onboarded_at' => null,
+        ]);
+
+        $this->fakeFirebaseToken('other_uid_token', [
+            'uid' => 'fb_uid_other_person',
+            'email' => 'orang.lain@gmail.com',
+            'email_verified' => true,
+        ]);
+
+        $response = $this->postJson('/admin/auth/activate', [
+            'id_token' => 'other_uid_token',
+            'name' => 'Nama Orang Lain',
+        ]);
+
+        $response->assertStatus(403);
+        $this->assertGuest();
+
+        $pending->refresh();
+        $this->assertNull($pending->firebase_uid);
+        $this->assertFalse($pending->is_active);
+        $this->assertNull($pending->onboarded_at);
+    }
+
+    public function test_activate_endpoint_rejects_revoked_or_invalid_token_with_unauthorized(): void
+    {
+        $firebase = Mockery::mock(FirebaseAuthentication::class);
+        $firebase->shouldReceive('verifyIdToken')
+            ->once()
+            ->with('revoked_token')
+            ->andThrow(new RuntimeException('Token autentikasi tidak valid atau telah dicabut.'));
+        $this->app->instance(FirebaseAuthentication::class, $firebase);
+
+        $response = $this->postJson('/admin/auth/activate', [
+            'id_token' => 'revoked_token',
+            'name' => 'Nama Operator Resmi',
+        ]);
+
+        $response->assertStatus(401);
+        $response->assertJson(['error' => 'Token autentikasi tidak valid atau telah kedaluwarsa.']);
+        $this->assertGuest();
     }
 
     public function test_session_endpoint_authenticates_onboarded_operator(): void
@@ -243,6 +331,24 @@ class FirebaseAuthEndpointsTest extends TestCase
 
         $response->assertStatus(403);
         $response->assertJson(['error' => 'Akun operator tidak ditemukan atau dinonaktifkan.']);
+        $this->assertGuest();
+    }
+
+    public function test_session_endpoint_rejects_invalid_token_with_unauthorized(): void
+    {
+        $firebase = Mockery::mock(FirebaseAuthentication::class);
+        $firebase->shouldReceive('verifyIdToken')
+            ->once()
+            ->with('expired_token')
+            ->andThrow(new RuntimeException('Token autentikasi tidak valid atau telah dicabut.'));
+        $this->app->instance(FirebaseAuthentication::class, $firebase);
+
+        $response = $this->postJson('/admin/auth/session', [
+            'id_token' => 'expired_token',
+        ]);
+
+        $response->assertStatus(401);
+        $response->assertJson(['error' => 'Token autentikasi tidak valid atau telah kedaluwarsa.']);
         $this->assertGuest();
     }
 

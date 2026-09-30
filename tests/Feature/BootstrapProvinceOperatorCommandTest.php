@@ -3,12 +3,12 @@
 namespace Tests\Feature;
 
 use App\Contracts\FirebaseAuthentication;
-use App\Models\AuditEvent;
 use App\Models\OrganizationUnit;
 use App\Models\UnitAssignment;
 use App\Models\User;
 use App\OrganizationUnitType;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Mockery;
 use RuntimeException;
 use Tests\TestCase;
@@ -125,7 +125,7 @@ class BootstrapProvinceOperatorCommandTest extends TestCase
         $this->assertDatabaseMissing('users', ['email' => 'admin.provinsi@gmail.com']);
     }
 
-    public function test_bootstrap_command_rolls_back_when_firebase_fails(): void
+    public function test_bootstrap_command_keeps_inactive_pending_record_and_logs_when_firebase_fails(): void
     {
         $provinsi = OrganizationUnit::factory()->create(['type' => OrganizationUnitType::Provinsi]);
 
@@ -136,12 +136,32 @@ class BootstrapProvinceOperatorCommandTest extends TestCase
             ->andThrow(new RuntimeException('Firebase down'));
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
 
+        Log::shouldReceive('error')
+            ->once()
+            ->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'bootstrap')
+                && ($context['email'] ?? null) === 'gagal.bootstrap@gmail.com'
+                && ($context['error'] ?? null) === 'Firebase down');
+
         $this->artisan('operators:bootstrap-province', ['email' => 'gagal.bootstrap@gmail.com'])
             ->expectsOutputToContain('Gagal mengirim undangan Firebase')
             ->assertFailed();
 
-        $this->assertDatabaseMissing('users', ['email' => 'gagal.bootstrap@gmail.com']);
-        $this->assertSame(0, UnitAssignment::query()->where('organization_unit_id', $provinsi->id)->count());
-        $this->assertSame(0, AuditEvent::query()->where('action', 'operator.bootstrapped')->count());
+        // The saga keeps the pending record inactive so a retry can reuse it rather than
+        // creating a duplicate Firebase identity.
+        $pending = User::query()->where('email', 'gagal.bootstrap@gmail.com')->first();
+        $this->assertNotNull($pending);
+        $this->assertNull($pending->firebase_uid);
+        $this->assertFalse($pending->is_active);
+        $this->assertNull($pending->onboarded_at);
+
+        $this->assertDatabaseHas('unit_assignments', [
+            'user_id' => $pending->id,
+            'organization_unit_id' => $provinsi->id,
+            'is_active' => false,
+        ]);
+        $this->assertDatabaseMissing('audit_events', [
+            'action' => 'operator.bootstrapped',
+            'subject_id' => $pending->id,
+        ]);
     }
 }

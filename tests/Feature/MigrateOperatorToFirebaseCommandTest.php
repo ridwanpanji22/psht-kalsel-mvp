@@ -9,6 +9,7 @@ use App\Models\UnitAssignment;
 use App\Models\User;
 use App\OrganizationUnitType;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Mockery;
 use RuntimeException;
 use Tests\TestCase;
@@ -135,6 +136,12 @@ class MigrateOperatorToFirebaseCommandTest extends TestCase
             ->with('gagal.migrasi@gmail.com')
             ->andThrow(new RuntimeException('Firebase down'));
         $this->app->instance(FirebaseAuthentication::class, $firebaseMock);
+
+        Log::shouldReceive('error')
+            ->once()
+            ->withArgs(fn (string $message, array $context = []): bool => str_contains($message, 'migrasi')
+                && ($context['email'] ?? null) === 'gagal.migrasi@gmail.com'
+                && ($context['error'] ?? null) === 'Firebase down');
 
         $this->artisan('operators:migrate-firebase', ['email' => 'gagal.migrasi@gmail.com'])
             ->assertFailed();

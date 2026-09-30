@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use RuntimeException;
 
 class FirebaseAuthSessionController extends Controller
 {
@@ -20,7 +21,11 @@ class FirebaseAuthSessionController extends Controller
             'id_token' => ['required', 'string'],
         ]);
 
-        $verified = $firebase->verifyIdToken($validated['id_token']);
+        try {
+            $verified = $firebase->verifyIdToken($validated['id_token']);
+        } catch (RuntimeException) {
+            return response()->json(['error' => 'Token autentikasi tidak valid atau telah kedaluwarsa.'], 401);
+        }
 
         // Match only by the verified Firebase UID. Falling back to email would let a
         // caller authenticate as a pending invite that has not been activated yet.

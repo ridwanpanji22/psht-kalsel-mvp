@@ -22,6 +22,10 @@ class CreateOperator
     /**
      * Provision a pending operator account and dispatch a Firebase invite.
      *
+     * Implemented as a saga rather than a single cross-network transaction so that local
+     * state is durable before the Firebase Admin call: stage 1 commits an inactive pending
+     * record, stage 2 performs the network call, stage 3 persists the Firebase UID.
+     *
      * @param  array{email: string, organization_unit_id: int}  $data
      */
     public function handle(User $actor, array $data): User
@@ -31,7 +35,9 @@ class CreateOperator
         $this->validateAuthority($actor, $targetUnitId);
         $this->validateEmail($data['email']);
 
-        return DB::transaction(function () use ($actor, $data, $targetUnitId): User {
+        // Stage 1: durably record the pending invitation. A later Firebase failure leaves
+        // this inactive record in place so a retry can reuse it (no duplicate identity).
+        $user = DB::transaction(function () use ($actor, $data, $targetUnitId): User {
             $user = User::query()->create([
                 'name' => null,
                 'email' => strtolower($data['email']),
@@ -47,8 +53,25 @@ class CreateOperator
                 'is_active' => false,
             ]);
 
-            $firebaseResult = $this->firebase->createUserWithInviteLink($user->email);
+            AuditEvent::query()->create([
+                'actor_id' => $actor->id,
+                'subject_type' => $user->getMorphClass(),
+                'subject_id' => $user->id,
+                'action' => 'operator.invitation_requested',
+                'metadata' => [
+                    'email' => $user->email,
+                    'organization_unit_id' => $targetUnitId,
+                ],
+            ]);
 
+            return $user;
+        });
+
+        // Stage 2: Firebase Admin network call, outside any database transaction.
+        $firebaseResult = $this->firebase->createUserWithInviteLink($user->email);
+
+        // Stage 3: bind the Firebase identity and record the completed invitation.
+        return DB::transaction(function () use ($actor, $user, $firebaseResult, $targetUnitId): User {
             $user->update(['firebase_uid' => $firebaseResult['uid']]);
 
             AuditEvent::query()->create([

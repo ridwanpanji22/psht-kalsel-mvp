@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 class FirebaseAuthActivationController extends Controller
 {
@@ -23,24 +24,40 @@ class FirebaseAuthActivationController extends Controller
             'name' => ['required', 'string', 'min:3', 'max:255'],
         ]);
 
-        $verified = $firebase->verifyIdToken($validated['id_token']);
+        try {
+            $verified = $firebase->verifyIdToken($validated['id_token']);
+        } catch (RuntimeException) {
+            return response()->json(['error' => 'Token autentikasi tidak valid atau telah kedaluwarsa.'], 401);
+        }
 
         if (! $verified['email_verified']) {
             return response()->json(['error' => 'Email belum diverifikasi oleh Firebase.'], 403);
         }
 
-        $user = User::query()->where('firebase_uid', $verified['uid'])->first()
-            ?? User::query()
-                ->where('email', $verified['email'])
-                ->whereNull('firebase_uid')
-                ->first();
+        $email = strtolower($verified['email']);
+
+        // Resolve the invitation strictly by the verified Firebase UID, but only when the
+        // verified token email equals the address recorded on the local account. Otherwise a
+        // caller could bind their Firebase identity to an unrelated local user.
+        $user = User::query()->where('firebase_uid', $verified['uid'])->first();
+
+        if ($user !== null && ! hash_equals(strtolower($user->email), $email)) {
+            return response()->json(['error' => 'Undangan aktivasi tidak ditemukan.'], 403);
+        }
+
+        // Initial activation: the invited row has no Firebase UID bound yet, so fall back to
+        // the verified email while the UID is still null.
+        $user ??= User::query()
+            ->where('email', $email)
+            ->whereNull('firebase_uid')
+            ->first();
 
         if (! $user) {
-            return response()->json(['error' => 'Undangan aktivasi tidak ditemukan.'], 404);
+            return response()->json(['error' => 'Undangan aktivasi tidak ditemukan.'], 403);
         }
 
         if ($user->isOnboarded()) {
-            return response()->json(['error' => 'Akun ini sudah pernah diaktivasi sebelumnya.'], 400);
+            return response()->json(['error' => 'Akun ini sudah pernah diaktivasi sebelumnya.'], 403);
         }
 
         DB::transaction(function () use ($user, $verified, $validated): void {
