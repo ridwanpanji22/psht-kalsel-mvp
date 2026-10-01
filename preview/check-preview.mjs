@@ -60,3 +60,28 @@ test('gallery preview provides public albums, filters, and an accessible lightbo
     assert.match(html, /Data contoh untuk preview/);
     assert.doesNotMatch(html, /nomor anggota|alamat rumah|telepon pribadi/i);
 });
+
+test('event previews expose time filters, localized details, and working navigation', async () => {
+    const index = await readPreview('kegiatan.html');
+    const detail = await readPreview('kegiatan-detail.html');
+
+    assert.match(index, /data-event-filter="upcoming"/);
+    assert.match(index, /data-event-filter="past"/);
+    assert.match(index, /data-event-filter="all"/);
+    assert.equal(countMatches(index, /data-event-status="upcoming"/g), 2);
+    assert.equal(countMatches(index, /data-event-status="past"/g), 1);
+    assert.match(index, /kegiatan-detail\.html\?slug=latihan-gabungan-provinsi/);
+    assert.match(index, /Padepokan PSHT Banjarmasin/);
+    assert.match(detail, /href="kegiatan\.html"/);
+    assert.match(detail, /id="event-detail-heading"/);
+    assert.match(detail, /Latihan Gabungan Tingkat Provinsi/);
+    assert.match(detail, /Data contoh untuk preview/);
+});
+
+test('event detail updates summary when slug selects another event', async () => {
+    const detail = await readPreview('kegiatan-detail.html');
+
+    assert.match(detail, /data-event-summary-date/);
+    assert.match(detail, /data-event-summary-time/);
+    assert.match(detail, /data-event-summary-location/);
+});
