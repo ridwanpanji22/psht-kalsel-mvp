@@ -99,3 +99,15 @@ test('training location preview pins Leaflet, exposes verified samples, and pres
     assert.match(html, /Data contoh untuk preview/);
     assert.doesNotMatch(html, /telepon pribadi|nomor anggota/i);
 });
+
+test('profile preview is an honest editorial shell without invented history', async () => {
+    const html = await readPreview('profil.html');
+
+    assert.equal(countMatches(html, /<h1\b/g), 1);
+    assert.match(html, /href="index\.html"/);
+    assert.match(html, /href="#gambaran-umum"/);
+    assert.match(html, /id="gambaran-umum"/);
+    assert.match(html, /max-w-3xl/);
+    assert.match(html, /Contoh konten preview, ganti dengan naskah profil terbit/);
+    assert.doesNotMatch(html, /(?:berdiri|didirikan) pada tahun \d{4}|memiliki [\d.]+ anggota|meraih penghargaan/i);
+});
