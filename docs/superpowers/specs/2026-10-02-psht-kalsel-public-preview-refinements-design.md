@@ -1,7 +1,7 @@
 # Spesifikasi Desain: Refinement Preview Halaman Publik PSHT Kalsel
 
-**Tanggal:** 2026-10-02  
-**Status:** Menunggu tinjauan spesifikasi tertulis  
+**Tanggal:** 2026-10-02
+**Status:** Menunggu tinjauan spesifikasi tertulis
 **Cakupan:** Preview HTML, CSS, dan JavaScript dalam `preview/`; Blade, routes Laravel, database, dan dependency produksi tidak berubah.
 
 ## 1. Tujuan
