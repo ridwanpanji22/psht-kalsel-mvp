@@ -86,6 +86,10 @@ test('event previews expose time filters, localized details, and working navigat
     assert.match(detail, /id="event-detail-heading"/);
     assert.match(detail, /Latihan Gabungan Tingkat Provinsi/);
     assert.match(detail, /Data contoh untuk preview/);
+
+    assert.equal(countMatches(index, /data-event-cover/g), 3);
+    assert.match(index, /src="\.\.\/public\/images\/hero-martial-arts-poster\.webp"/);
+    assert.match(detail, /data-event-detail-cover/);
 });
 
 test('event detail updates summary when slug selects another event', async () => {
