@@ -85,3 +85,17 @@ test('event detail updates summary when slug selects another event', async () =>
     assert.match(detail, /data-event-summary-time/);
     assert.match(detail, /data-event-summary-location/);
 });
+
+test('training location preview pins Leaflet, exposes verified samples, and preserves attribution', async () => {
+    const html = await readPreview('tempat-latihan.html');
+
+    assert.match(html, /id="training-map"/);
+    assert.match(html, /leaflet@1\.9\.4\/dist\/leaflet\.css/);
+    assert.match(html, /leaflet@1\.9\.4\/dist\/leaflet\.js/);
+    assert.match(html, /sha256-p4NxAoJBhIIN\+hmNHrzRCf9tD\/miZyoHS5obTRR9BMY=/);
+    assert.match(html, /sha256-20nQCchB9co0qIjJZRGuk2\/Z9VM\+kNiyxNV1lvTlZBo=/);
+    assert.match(html, /OpenStreetMap contributors/);
+    assert.equal(countMatches(html, /data-location-id=/g), 4);
+    assert.match(html, /Data contoh untuk preview/);
+    assert.doesNotMatch(html, /telepon pribadi|nomor anggota/i);
+});
