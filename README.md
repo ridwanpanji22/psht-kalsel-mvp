@@ -11,10 +11,36 @@ Requirements: PHP 8.3+, Composer, Node.js/npm, and MySQL 8 for configured applic
 3. Set `DB_CONNECTION=mysql`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD` in your local `.env`.
 4. Install dependencies/build assets if not already installed: `composer install && npm install && npm run build`.
 5. Run `php artisan migrate` after MySQL is available.
-6. Create the initial operator in Tinker or through your approved provisioning process; never expose public registration. Operator panel access requires an active user with an active unit assignment.
-7. Start locally with `composer run dev` and open the URL printed by Laravel.
+6. **Configure Firebase Admin credentials.** Store the service account JSON **outside the repository** (e.g. `~/secrets/firebase-service-account.json` or a path under `storage/` that is never committed) and point `FIREBASE_CREDENTIALS` at that absolute path. Do not commit the key, and do not place it inside the project tree. Set `FIREBASE_PROJECT_ID` to the same project.
+7. **Configure all Firebase Web (client) settings.** Fill every `VITE_FIREBASE_*` variable — `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, and `VITE_FIREBASE_APP_ID`. These are public values embedded in the login/activation pages and rebuild with `npm run build`. Missing values leave the operator login with “Konfigurasi Firebase belum tersedia”.
+8. **Enable the Firebase providers.** In the Firebase Console enable the **Email Link (passwordless sign-in)** and **Google** sign-in providers, and add every host that serves `/admin/login` and `/admin/activate` to **Authentication → Settings → Authorized domains** (include `localhost` for local work). Email Link invites are sent by the Admin SDK in Indonesian (`locale = 'id'`).
+9. **Create the initial operator** (not via Tinker) with the province bootstrap command:
+
+   ```bash
+   php artisan operators:bootstrap-province admin@gmail.com
+   ```
+
+   It provisions the first active Province operator and emails the activation invite.
+10. **Migrate a legacy operator** (existing local account without a Firebase identity) with:
+
+    ```bash
+    php artisan operators:migrate-firebase operator@gmail.com
+    ```
+
+11. Start locally with `composer run dev` and open the URL printed by Laravel.
+
+Panel access requires an active user with an active unit assignment **and** a completed onboarding (`onboarded_at`). Operator login itself remains blocked locally until the replacement service-account key and web configuration above are in place (see the note below).
 
 For isolated local work before MySQL exists, `.env` may use SQLite. Automated tests use `DB_CONNECTION=sqlite`, `DB_DATABASE=:memory:` from `phpunit.xml`; tests do not read/write production DB.
+
+### Operator login/activation smoke is blocked until credentials are replaced
+
+A previously exposed service-account key was revoked, and no replacement key or Firebase web configuration is present in this environment. Until a **new service-account key** (path configured outside the repo via `FIREBASE_CREDENTIALS`) and the complete `VITE_FIREBASE_*` web settings are supplied:
+
+- the invite emails from the bootstrap/migration commands cannot be sent, and
+- the end-to-end login/activation browser smoke cannot be completed.
+
+This is an environment prerequisite, not a code defect. Tests mock the Firebase boundary and do not require real credentials.
 
 ## Verification
 
@@ -45,6 +71,7 @@ Not implemented in this MVP: correspondence/signature, finance ledgers/reports, 
 - Provide official member-number format/validation. Current implementation uses a globally unique opaque value, maximum 100 characters; this is provisional.
 - Decide required member fields, duplicate-review workflow, membership transition set, data correction/deletion/retention policy, and privacy/legal basis.
 - Decide allowed public fields, content reviewers, public media processing/moderation and operational content owner.
+- Confirm publication rights and consent for the homepage hero video and its poster, including every identifiable person shown. Until confirmed in writing, the hero ships as poster-only with no video source or autoplay (see Release blockers).
 - Choose map tile provider, acceptable usage policy, production attribution text, and tile service configuration. Leaflet frontend has no tile URL/provider configured; do not publish production locations on an unconfigured basemap.
 - Verify actual shared-hosting PHP/extensions, MySQL, HTTPS, cron, SMTP, writable directories, resources, off-host encrypted backup, restore, operational owner, pilot cohort, SLA/RPO/RTO.
 
@@ -60,6 +87,8 @@ Until each decision is approved, its dependent path remains development-only and
 - `.env` and secrets must never be committed. No production credential/database has been entered by setup.
 
 ### Release blockers
+
+Before production deployment the owner must explicitly confirm the publication rights for the homepage hero media and the consent of every identifiable person shown in it. The presence of an asset in the repository is not approval to publish it: an asset being committed, referenced, or rendered in a build proves nothing about rights or consent. Where consent is not yet recorded, the homepage hero must ship with the poster image fallback only, with no video source and no autoplay, until the owner signs off. Do not publish to production or claim release approval from asset presence alone.
 
 Production/pilot remains blocked until all owner decisions above are recorded, the MySQL/shared-hosting environment passes the same migrations and browser smoke, a scheduled cron run is evidenced, and an encrypted off-host backup is restored into isolated staging. The application has no configured map tile provider, SMTP, production database, initial production operator, or backup destination.
 

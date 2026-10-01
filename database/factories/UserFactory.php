@@ -50,4 +50,25 @@ class UserFactory extends Factory
             'is_active' => false,
         ]);
     }
+
+    /**
+     * Mark the operator as having completed onboarding.
+     */
+    public function onboarded(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'onboarded_at' => now(),
+        ]);
+    }
+
+    /**
+     * Mark the operator as pending activation (never onboarded).
+     */
+    public function pending(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'onboarded_at' => null,
+            'is_active' => false,
+        ]);
+    }
 }

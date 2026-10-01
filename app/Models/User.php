@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password', 'is_active'])]
+#[Fillable(['name', 'email', 'password', 'is_active', 'firebase_uid', 'onboarded_at'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements FilamentUser
 {
@@ -29,7 +29,16 @@ class User extends Authenticatable implements FilamentUser
     public function canAccessPanel(Panel $panel): bool
     {
         return $this->is_active
+            && $this->isOnboarded()
             && $this->unitAssignments()->where('is_active', true)->exists();
+    }
+
+    /**
+     * Determine whether the user has completed onboarding.
+     */
+    public function isOnboarded(): bool
+    {
+        return $this->onboarded_at !== null && filled($this->name);
     }
 
     /**
@@ -49,6 +58,7 @@ class User extends Authenticatable implements FilamentUser
     {
         return [
             'email_verified_at' => 'datetime',
+            'onboarded_at' => 'datetime',
             'is_active' => 'boolean',
             'password' => 'hashed',
         ];

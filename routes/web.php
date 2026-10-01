@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\ApprovalDecisionController;
+use App\Http\Controllers\Auth\FirebaseAuthActivationController;
+use App\Http\Controllers\Auth\FirebaseAuthSessionController;
 use App\Http\Controllers\PrivateMediaController;
 use App\Http\Controllers\Public\EventController;
 use App\Http\Controllers\Public\GalleryController;
@@ -20,6 +22,15 @@ Route::get('/media/{media}', PublicMediaController::class)->name('public.media.s
 Route::get('/kegiatan', [EventController::class, 'index'])->name('public.events.index');
 Route::get('/kegiatan/{slug}', [EventController::class, 'show'])->name('public.events.show');
 Route::get('/tempat-latihan', [TrainingLocationController::class, 'index'])->name('public.training-locations.index');
+
+Route::get('/admin/activate', fn () => view('auth.activate'))->name('auth.activate');
+
+Route::post('/admin/auth/session', FirebaseAuthSessionController::class)
+    ->middleware('throttle:5,1')
+    ->name('auth.firebase.session');
+Route::post('/admin/auth/activate', FirebaseAuthActivationController::class)
+    ->middleware('throttle:5,1')
+    ->name('auth.firebase.activate');
 
 Route::post('/admin/pages/{page}/submit-for-review', [PublishedContentController::class, 'store'])
     ->middleware('auth')
