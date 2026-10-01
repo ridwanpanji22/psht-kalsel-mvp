@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\Gallery;
 use App\Models\Page;
+use App\Models\TrainingLocation;
 use Illuminate\View\View;
 
 class HomeController extends Controller
@@ -29,8 +30,20 @@ class HomeController extends Controller
             'galleries' => Gallery::query()
                 ->published()
                 ->select(['id', 'slug', 'title', 'description'])
+                ->with(['media' => fn ($query) => $query
+                    ->where('is_public', true)
+                    ->where('disk', 'public')
+                    ->select(['id', 'gallery_id', 'path', 'alt_text'])
+                    ->limit(1)])
                 ->orderByDesc('published_at')
                 ->limit(4)
+                ->get(),
+            'trainingLocations' => TrainingLocation::query()
+                ->published()
+                ->whereNotNull('verified_at')
+                ->select(['id', 'name', 'slug', 'address', 'latitude', 'longitude'])
+                ->orderBy('name')
+                ->limit(3)
                 ->get(),
         ]);
     }
