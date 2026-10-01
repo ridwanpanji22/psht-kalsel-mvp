@@ -1,6 +1,7 @@
 import './firebase-auth';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { initGalleryCarousels } from './gallery-carousel';
 
 const mapElement = document.querySelector('#training-map');
 const locationDataElement = document.querySelector('#training-location-data');
@@ -56,4 +57,11 @@ function escapeHtml(value) {
         '"': '&quot;',
         "'": '&#039;',
     })[character]);
+}
+
+// Initialize carousel after DOM content loaded
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => initGalleryCarousels());
+} else {
+    initGalleryCarousels();
 }
