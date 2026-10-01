@@ -5,16 +5,15 @@
     $firebaseConfig = config('services.firebase.client');
 @endphp
 
-<!doctype html>
-<html lang="id">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Masuk Operator — PSHT Kalimantan Selatan</title>
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
-</head>
-<div class="min-h-screen bg-stone-50 text-stone-900 antialiased">
+{{--
+    This view is the body of a Livewire component rendered inside Filament's simple layout.
+    It must expose exactly one root element (the component root) and must NOT declare
+    <!doctype>, <html>, <head>, <body> or a closing </html>: Filament's
+    `filament-panels::components.layout.base` already renders the full document, <head>,
+    assets and <body>. Injecting document tags here nests a second document and triggers
+    Livewire's "missing closing tag" warning.
+--}}
+<div data-firebase-login-wrapper class="min-h-screen bg-stone-50 text-stone-900 antialiased">
     <header class="border-b border-stone-200 bg-white">
         <nav class="mx-auto flex max-w-2xl items-center justify-between gap-4 px-4 py-4" aria-label="Navigasi utama">
             <a href="{{ route('public.home') }}" class="font-semibold text-emerald-900">PSHT Kalimantan Selatan</a>
@@ -91,18 +90,19 @@
             </section>
 
             {!! FilamentView::renderHook(PanelsRenderHook::AUTH_LOGIN_FORM_AFTER, scopes: $this->getRenderHookScopes()) !!}
+
+            <script>
+                window._FIREBASE_CONFIG = {
+                    apiKey: @json($firebaseConfig['api_key'] ?? null),
+                    authDomain: @json($firebaseConfig['auth_domain'] ?? null),
+                    projectId: @json($firebaseConfig['project_id'] ?? null),
+                    storageBucket: @json($firebaseConfig['storage_bucket'] ?? null),
+                    messagingSenderId: @json($firebaseConfig['messaging_sender_id'] ?? null),
+                    appId: @json($firebaseConfig['app_id'] ?? null),
+                };
+            </script>
+
+            @vite(['resources/css/app.css', 'resources/js/app.js'])
         </section>
     </main>
-
-    <script>
-        window._FIREBASE_CONFIG = {
-            apiKey: @json($firebaseConfig['api_key'] ?? null),
-            authDomain: @json($firebaseConfig['auth_domain'] ?? null),
-            projectId: @json($firebaseConfig['project_id'] ?? null),
-            storageBucket: @json($firebaseConfig['storage_bucket'] ?? null),
-            messagingSenderId: @json($firebaseConfig['messaging_sender_id'] ?? null),
-            appId: @json($firebaseConfig['app_id'] ?? null),
-        };
-    </script>
 </div>
-</html>
