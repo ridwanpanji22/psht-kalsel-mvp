@@ -46,3 +46,17 @@ test('structure preview preserves unit hierarchy and supervision semantics', asy
     assert.match(html, /Data contoh untuk preview/);
     assert.match(html, /aria-live="polite"/);
 });
+
+test('gallery preview provides public albums, filters, and an accessible lightbox', async () => {
+    const html = await readPreview('galeri.html');
+
+    assert.equal(countMatches(html, /data-gallery-card/g), 6);
+    assert.match(html, /data-gallery-filter="all"/);
+    assert.match(html, /data-gallery-filter="latihan"/);
+    assert.match(html, /data-gallery-filter="kegiatan"/);
+    assert.match(html, /data-gallery-filter="pembinaan"/);
+    assert.match(html, /<dialog[^>]+id="gallery-dialog"/);
+    assert.match(html, /aria-label="Tutup foto"/);
+    assert.match(html, /Data contoh untuk preview/);
+    assert.doesNotMatch(html, /nomor anggota|alamat rumah|telepon pribadi/i);
+});
