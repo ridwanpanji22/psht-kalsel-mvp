@@ -147,7 +147,7 @@
 
                     <div data-carousel-dots class="mt-4 flex items-center justify-center" role="tablist" aria-label="Pilih album galeri">
                         @foreach ($publishedGalleries as $index => $gallery)
-                            <button type="button" role="tab" data-carousel-dot="{{ $index }}" aria-selected="{{ $index === 0 ? 'true' : 'false' }}" aria-label="Lihat album {{ $index + 1 }}: {{ $gallery->title }}" class="flex min-h-[44px] min-w-[44px] items-center justify-center focus:outline-2 focus:outline-offset-2 focus:outline-[#2162ed]">
+                            <button type="button" role="tab" data-carousel-dot="{{ $index }}" aria-selected="{{ $index === 0 ? 'true' : 'false' }}" aria-label="Lihat album {{ $index + 1 }}: {{ $gallery->title }}" class="flex min-h-[32px] min-w-[32px] items-center justify-center focus:outline-2 focus:outline-offset-2 focus:outline-[#2162ed]">
                                 <span class="block h-2 rounded-full transition-all duration-300 {{ $index === 0 ? 'w-6 bg-[#2162ed]' : 'w-2 bg-white/30 hover:bg-white/60' }}" aria-hidden="true"></span>
                             </button>
                         @endforeach
