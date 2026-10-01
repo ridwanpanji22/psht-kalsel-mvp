@@ -50,7 +50,7 @@ test('structure preview preserves unit hierarchy and supervision semantics', asy
 test('gallery preview provides public albums, filters, and an accessible lightbox', async () => {
     const html = await readPreview('galeri.html');
 
-    assert.equal(countMatches(html, /data-gallery-card/g), 6);
+    assert.equal(countMatches(html, /data-gallery-card/g), 8);
     assert.match(html, /data-gallery-filter="all"/);
     assert.match(html, /data-gallery-filter="latihan"/);
     assert.match(html, /data-gallery-filter="kegiatan"/);
@@ -59,6 +59,16 @@ test('gallery preview provides public albums, filters, and an accessible lightbo
     assert.match(html, /aria-label="Tutup foto"/);
     assert.match(html, /Data contoh untuk preview/);
     assert.doesNotMatch(html, /nomor anggota|alamat rumah|telepon pribadi/i);
+});
+
+test('gallery preview provides functional pagination and lightbox navigation controls', async () => {
+    const html = await readPreview('galeri.html');
+
+    assert.match(html, /data-gallery-prev/);
+    assert.match(html, /data-gallery-next/);
+    assert.match(html, /data-gallery-page/);
+    assert.match(html, /data-lightbox-prev/);
+    assert.match(html, /data-lightbox-next/);
 });
 
 test('event previews expose time filters, localized details, and working navigation', async () => {
@@ -86,6 +96,12 @@ test('event detail updates summary when slug selects another event', async () =>
     assert.match(detail, /data-event-summary-location/);
 });
 
+test('event detail includes a location map preview region', async () => {
+    const detail = await readPreview('kegiatan-detail.html');
+    assert.match(detail, /id="event-map-preview"/);
+    assert.match(detail, /aria-label="Peta lokasi kegiatan"/);
+});
+
 test('training location preview pins Leaflet, exposes verified samples, and preserves attribution', async () => {
     const html = await readPreview('tempat-latihan.html');
 
@@ -110,6 +126,11 @@ test('profile preview is an honest editorial shell without invented history', as
     assert.match(html, /max-w-3xl/);
     assert.match(html, /Contoh konten preview, ganti dengan naskah profil terbit/);
     assert.doesNotMatch(html, /(?:berdiri|didirikan) pada tahun \d{4}|memiliki [\d.]+ anggota|meraih penghargaan/i);
+});
+
+test('profile opening paragraph uses the editorial drop-cap treatment', async () => {
+    const html = await readPreview('profil.html');
+    assert.match(html, /class="[^"]*editorial-drop-cap/);
 });
 
 test('every preview page has one heading and all local links and assets resolve', async () => {
