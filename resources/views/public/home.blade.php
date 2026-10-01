@@ -39,7 +39,7 @@
 
         <div class="mx-auto w-full max-w-6xl px-4 pt-28 pb-16 sm:pt-32">
             <p class="text-sm font-semibold uppercase tracking-[0.2em] text-amber-300">PSHT Kalimantan Selatan</p>
-            <h1 id="hero-heading" class="mt-4 max-w-3xl text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl">Persaudaraan dan pembinaan di Kalimantan Selatan.</h1>
+            <h1 id="hero-heading" class="mt-4 max-w-4xl text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-[3.25rem]">Persaudaraan dan pembinaan di Kalimantan Selatan.</h1>
             <p class="mt-6 max-w-2xl text-lg leading-8 text-stone-200">Portal resmi PSHT Kalimantan Selatan untuk mengenal organisasi, kegiatan, galeri, dan tempat latihan.</p>
             <div class="mt-9 flex flex-wrap gap-3">
                 <a href="{{ route('public.organization.index') }}" class="rounded-md bg-[#0720b0] px-5 py-3 font-semibold text-white hover:bg-[#2162ed] focus:bg-[#2162ed] focus:outline-2 focus:outline-offset-2 focus:outline-[#2162ed]">Jelajahi struktur</a>
