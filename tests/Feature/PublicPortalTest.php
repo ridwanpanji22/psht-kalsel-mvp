@@ -262,4 +262,47 @@ class PublicPortalTest extends TestCase
             ->assertDontSee('hero-martial-arts.mp4')
             ->assertDontSee('<details', false);
     }
+
+    public function test_homepage_supplies_up_to_eight_published_galleries_with_public_covers(): void
+    {
+        // 9 published galleries each with one public media — only 8 should appear
+        for ($i = 1; $i <= 9; $i++) {
+            $g = Gallery::factory()->create([
+                'status'       => PublicationStatus::Published,
+                'published_at' => now()->subDays($i),
+            ]);
+            Media::factory()->create([
+                'gallery_id'          => $g->id,
+                'organization_unit_id'=> $g->organization_unit_id,
+                'disk'                => 'public',
+                'path'                => "gallery/cover-{$i}.jpg",
+                'alt_text'            => "Sampul {$i}",
+                'is_public'           => true,
+            ]);
+        }
+
+        // 1 published gallery with only private media — must not appear in media results
+        $private = Gallery::factory()->create([
+            'status'       => PublicationStatus::Published,
+            'published_at' => now()->subDays(20),
+        ]);
+        Media::factory()->create([
+            'gallery_id'          => $private->id,
+            'organization_unit_id'=> $private->organization_unit_id,
+            'disk'                => 'local',
+            'path'                => 'private/secret.jpg',
+            'alt_text'            => 'Rahasia',
+            'is_public'           => false,
+        ]);
+
+        $response = $this->get(route('public.home'))->assertOk();
+
+        $response->assertViewHas('galleries', function ($galleries) {
+            $paths = $galleries->pluck('media')->flatten()->pluck('path')->all();
+
+            return $galleries->count() === 8
+                && ! in_array('private/secret.jpg', $paths, true)
+                && collect($paths)->every(fn ($p) => str_starts_with($p, 'gallery/cover-'));
+        });
+    }
 }

@@ -36,7 +36,7 @@ class HomeController extends Controller
                     ->select(['id', 'gallery_id', 'path', 'alt_text'])
                     ->limit(1)])
                 ->orderByDesc('published_at')
-                ->limit(4)
+                ->limit(8)
                 ->get(),
             'trainingLocations' => TrainingLocation::query()
                 ->published()
