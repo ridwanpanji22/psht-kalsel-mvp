@@ -22,10 +22,11 @@ export function initGalleryCarousels(root = document) {
             dots.forEach((dot, idx) => {
                 const isCurrent = idx === newIndex;
                 dot.setAttribute('aria-selected', isCurrent ? 'true' : 'false');
-                dot.classList.toggle('w-6', isCurrent);
-                dot.classList.toggle('bg-[#2162ed]', isCurrent);
-                dot.classList.toggle('w-2', !isCurrent);
-                dot.classList.toggle('bg-white/30', !isCurrent);
+                const visual = dot.querySelector('span') ?? dot;
+                visual.classList.toggle('w-6', isCurrent);
+                visual.classList.toggle('bg-[#2162ed]', isCurrent);
+                visual.classList.toggle('w-2', !isCurrent);
+                visual.classList.toggle('bg-white/30', !isCurrent);
             });
         };
 
