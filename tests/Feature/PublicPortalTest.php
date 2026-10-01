@@ -263,6 +263,38 @@ class PublicPortalTest extends TestCase
             ->assertDontSee('<details', false);
     }
 
+    public function test_homepage_renders_gallery_carousel_structure_and_controls(): void
+    {
+        Storage::fake('public');
+
+        for ($i = 1; $i <= 8; $i++) {
+            $gallery = Gallery::factory()->create([
+                'title' => "Album Carousel {$i}",
+                'status' => PublicationStatus::Published,
+                'published_at' => now()->subDays($i),
+            ]);
+            Media::factory()->create([
+                'gallery_id' => $gallery->id,
+                'organization_unit_id' => $gallery->organization_unit_id,
+                'disk' => 'public',
+                'path' => "gallery/carousel-{$i}.jpg",
+                'alt_text' => "Sampul Carousel {$i}",
+                'is_public' => true,
+            ]);
+        }
+
+        $response = $this->get(route('public.home'))->assertOk();
+
+        $response->assertSee('data-gallery-carousel', false);
+        $response->assertSee('data-carousel-scroller', false);
+        $response->assertSee('data-carousel-prev', false);
+        $response->assertSee('data-carousel-next', false);
+        $response->assertSee('data-carousel-dot="0"', false);
+        $response->assertSee('aria-roledescription="carousel"', false);
+        $response->assertDontSee('lg:col-span-2', false);
+        $response->assertDontSee('lg:row-span-2', false);
+    }
+
     public function test_homepage_supplies_up_to_eight_published_galleries_with_public_covers(): void
     {
         // Create galleries newest-first (i=1 newest, i=9 oldest among the public set).

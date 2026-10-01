@@ -114,21 +114,43 @@
                     <p class="text-sm font-semibold uppercase tracking-[0.2em] text-amber-300">Dokumentasi</p>
                     <h2 id="galleries-heading" class="mt-3 text-3xl font-bold tracking-tight text-white">Galeri</h2>
                 </div>
-                <a href="{{ route('public.galleries.index') }}" class="font-medium text-amber-300 underline-offset-4 hover:underline focus:outline-2 focus:outline-offset-2 focus:outline-amber-300">Semua album</a>
+                <div class="flex items-center gap-4">
+                    <a href="{{ route('public.galleries.index') }}" class="font-medium text-amber-300 underline-offset-4 hover:underline focus:outline-2 focus:outline-offset-2 focus:outline-amber-300">Semua album</a>
+                    @php $publishedGalleries = $galleries->filter(fn ($gallery) => $gallery->media->isNotEmpty())->values(); @endphp
+                    @if ($publishedGalleries->isNotEmpty())
+                        <div class="hidden items-center gap-2 md:flex" aria-label="Kontrol carousel galeri">
+                            <button type="button" data-carousel-prev class="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/5 text-white transition hover:bg-[#0720b0] hover:border-[#2162ed] focus:outline-2 focus:outline-offset-2 focus:outline-[#2162ed]" aria-label="Album sebelumnya">
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                            </button>
+                            <button type="button" data-carousel-next class="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-white/5 text-white transition hover:bg-[#0720b0] hover:border-[#2162ed] focus:outline-2 focus:outline-offset-2 focus:outline-[#2162ed]" aria-label="Album berikutnya">
+                                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+                            </button>
+                        </div>
+                    @endif
+                </div>
             </div>
-            @php $publishedGalleries = $galleries->filter(fn ($gallery) => $gallery->media->isNotEmpty()); @endphp
+
             @if ($publishedGalleries->isEmpty())
                 <p class="mt-10 rounded-2xl border border-dashed border-white/20 bg-[#111722] p-6 text-stone-400">Belum ada dokumentasi yang diterbitkan.</p>
             @else
-                <div class="mt-10 grid gap-4 lg:grid-cols-3">
-                    @foreach ($publishedGalleries as $index => $gallery)
-                        <article class="overflow-hidden rounded-2xl border border-white/10 bg-[#111722] {{ $index === 0 ? 'lg:col-span-2 lg:row-span-2' : '' }}">
-                            <a href="{{ route('public.galleries.index') }}" class="block focus:outline-2 focus:outline-offset-2 focus:outline-amber-300">
-                                <img class="aspect-video w-full object-cover {{ $index === 0 ? 'lg:aspect-[4/5]' : '' }}" src="{{ route('public.media.show', $gallery->media->first()) }}" alt="{{ $gallery->media->first()->alt_text }}" loading="lazy">
-                                <h3 class="px-5 py-4 font-semibold text-white">{{ $gallery->title }}</h3>
-                            </a>
-                        </article>
-                    @endforeach
+                <div data-gallery-carousel role="region" aria-roledescription="carousel" aria-label="Galeri dokumentasi" class="relative mt-8">
+                    <div data-carousel-scroller tabindex="0" class="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 scroll-smooth focus:outline-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                        @foreach ($publishedGalleries as $index => $gallery)
+                            <article data-carousel-item data-index="{{ $index }}" class="w-full shrink-0 snap-start overflow-hidden rounded-2xl border border-white/10 bg-[#111722] md:w-[calc((100%-2rem)/3)]">
+                                <a href="{{ route('public.galleries.index') }}" class="block focus:outline-2 focus:outline-offset-2 focus:outline-[#2162ed]">
+                                    <img class="aspect-video w-full object-cover" src="{{ route('public.media.show', $gallery->media->first()) }}" alt="{{ $gallery->media->first()->alt_text }}" loading="lazy">
+                                    <h3 class="px-5 py-4 font-semibold text-white truncate">{{ $gallery->title }}</h3>
+                                </a>
+                            </article>
+                        @endforeach
+                    </div>
+
+                    <div data-carousel-dots class="mt-4 flex items-center justify-center gap-2" role="tablist" aria-label="Pilih album galeri">
+                        @foreach ($publishedGalleries as $index => $gallery)
+                            <button type="button" role="tab" data-carousel-dot="{{ $index }}" aria-selected="{{ $index === 0 ? 'true' : 'false' }}" aria-label="Lihat album {{ $index + 1 }}: {{ $gallery->title }}" class="h-2 rounded-full transition-all duration-300 {{ $index === 0 ? 'w-6 bg-[#2162ed]' : 'w-2 bg-white/30 hover:bg-white/60' }} focus:outline-2 focus:outline-offset-2 focus:outline-[#2162ed]"></button>
+                        @endforeach
+                    </div>
+                    <div data-carousel-status aria-live="polite" class="sr-only"></div>
                 </div>
             @endif
         </div>
