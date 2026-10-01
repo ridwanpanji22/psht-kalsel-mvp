@@ -58,7 +58,7 @@ const activeFilter = eventFilters.find((button) => button.getAttribute('aria-pre
 if (activeFilter) applyEventFilter(activeFilter.dataset.eventFilter);
 
 const requestedSlug = new URLSearchParams(window.location.search).get('slug');
-const selectedEvent = sampleEvents[requestedSlug] ?? sampleEvents['latihan-gabungan-provinsi'];
+const selectedEvent = Object.hasOwn(sampleEvents, requestedSlug) ? sampleEvents[requestedSlug] : sampleEvents['latihan-gabungan-provinsi'];
 const title = document.querySelector('[data-event-title]');
 const date = document.querySelector('[data-event-date]');
 const venue = document.querySelector('[data-event-venue]');

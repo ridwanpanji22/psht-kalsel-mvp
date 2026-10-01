@@ -49,6 +49,9 @@ function createFakeDom(selectors, { search = '', leaflet = true } = {}) {
         querySelector(selector) {
             return elements.has(selector) ? elements.get(selector) : null;
         },
+        querySelectorAll() {
+            return [];
+        },
         createElement(tag) {
             return new FakeElement(tag);
         },
@@ -72,12 +75,18 @@ function createFakeDom(selectors, { search = '', leaflet = true } = {}) {
         };
     }
 
-    const context = vm.createContext({ document, window, HTMLElement: FakeElement, URLSearchParams, encodeURIComponent });
+    const context = vm.createContext({ document, window, navigator: {}, HTMLElement: FakeElement, URLSearchParams, encodeURIComponent });
 
     return { context, elements, mapCalls, FakeElement };
 }
 
 function runLocationsScript(source, dom) {
+    vm.runInContext(source, dom.context);
+}
+
+// Executes any real preview script inside the same minimal fake DOM so tests can
+// assert on rendered element state (`textContent`) rather than on source text.
+function runScript(source, dom) {
     vm.runInContext(source, dom.context);
 }
 
@@ -223,6 +232,32 @@ test('event detail updates summary when slug selects another event', async () =>
     assert.match(detail, /data-event-summary-date/);
     assert.match(detail, /data-event-summary-time/);
     assert.match(detail, /data-event-summary-location/);
+});
+
+test('event detail renders the default event for inherited, unknown, and missing slugs', async () => {
+    const script = await readPreview('assets/events.js');
+    const eventSelectors = ['[data-event-title]', '[data-event-date]', '[data-event-venue]', '[data-event-description]', '[data-event-summary-date]', '[data-event-summary-time]', '[data-event-summary-location]'];
+
+    // The single valid non-default selection proves the lookup really reads the
+    // registry (and the default below is not an unconditional fallback).
+    const selectedDom = createFakeDom(eventSelectors, { search: '?slug=ujian-siswa-cabang-banjarmasin' });
+    runScript(script, selectedDom);
+    assert.equal(selectedDom.elements.get('[data-event-title]').textContent, 'Ujian Siswa Cabang Banjarmasin');
+    assert.equal(selectedDom.elements.get('[data-event-summary-date]').textContent, '6 Desember 2026');
+
+    for (const slug of ['constructor', 'toString', '__proto__', 'tidak-dikenal', '']) {
+        const dom = createFakeDom(eventSelectors, { search: slug ? `?slug=${slug}` : '' });
+        runScript(script, dom);
+        const label = slug || 'missing slug';
+        assert.equal(
+            dom.elements.get('[data-event-title]').textContent,
+            'Latihan Gabungan Tingkat Provinsi',
+            `?slug=${label} must render the default event title`,
+        );
+        assert.equal(dom.elements.get('[data-event-summary-date]').textContent, '15 November 2026', `?slug=${label} must render the default summary date`);
+        assert.equal(dom.elements.get('[data-event-date]').textContent, 'Minggu, 15 November 2026, 08.00 WITA', `?slug=${label} must render the default schedule`);
+        assert.equal(dom.elements.get('[data-event-venue]').textContent, 'Padepokan PSHT Banjarmasin', `?slug=${label} must render the default venue`);
+    }
 });
 
 test('event detail includes a location map preview region', async () => {
