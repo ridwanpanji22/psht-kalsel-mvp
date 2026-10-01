@@ -34,6 +34,7 @@ class PublicPortalTest extends TestCase
         Event::factory()->create([
             'title' => 'Latihan Bersama',
             'status' => PublicationStatus::Published,
+            'starts_at' => now()->addDays(7),
             'published_at' => now(),
         ]);
 
