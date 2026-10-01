@@ -265,44 +265,78 @@ class PublicPortalTest extends TestCase
 
     public function test_homepage_supplies_up_to_eight_published_galleries_with_public_covers(): void
     {
-        // 9 published galleries each with one public media — only 8 should appear
+        // Create galleries newest-first (i=1 newest, i=9 oldest among the public set).
+        // Controller orders by publishedAt DESC and caps at 8, so galleries 1–8 must appear;
+        // gallery-9 (Album Foto 9, published 9 days ago) must be absent.
+        $base = now()->startOfDay();
+
         for ($i = 1; $i <= 9; $i++) {
             $g = Gallery::factory()->create([
+                'title'        => "Album Foto {$i}",
                 'status'       => PublicationStatus::Published,
-                'published_at' => now()->subDays($i),
+                'published_at' => $base->copy()->subDays($i),
             ]);
             Media::factory()->create([
-                'gallery_id'          => $g->id,
-                'organization_unit_id'=> $g->organization_unit_id,
-                'disk'                => 'public',
-                'path'                => "gallery/cover-{$i}.jpg",
-                'alt_text'            => "Sampul {$i}",
-                'is_public'           => true,
+                'gallery_id'           => $g->id,
+                'organization_unit_id' => $g->organization_unit_id,
+                'disk'                 => 'public',
+                'path'                 => "gallery/cover-{$i}.jpg",
+                'alt_text'             => "Sampul {$i}",
+                'is_public'            => true,
             ]);
         }
 
-        // 1 published gallery with only private media — must not appear in media results
+        // Published gallery with ONLY private media — its cover must not appear at all.
         $private = Gallery::factory()->create([
+            'title'        => 'Album Privat',
             'status'       => PublicationStatus::Published,
-            'published_at' => now()->subDays(20),
+            'published_at' => $base->copy()->subDays(20),
         ]);
         Media::factory()->create([
-            'gallery_id'          => $private->id,
-            'organization_unit_id'=> $private->organization_unit_id,
-            'disk'                => 'local',
-            'path'                => 'private/secret.jpg',
-            'alt_text'            => 'Rahasia',
-            'is_public'           => false,
+            'gallery_id'           => $private->id,
+            'organization_unit_id' => $private->organization_unit_id,
+            'disk'                 => 'local',
+            'path'                 => 'private/secret.jpg',
+            'alt_text'             => 'Rahasia',
+            'is_public'            => false,
         ]);
 
         $response = $this->get(route('public.home'))->assertOk();
 
         $response->assertViewHas('galleries', function ($galleries) {
-            $paths = $galleries->pluck('media')->flatten()->pluck('path')->all();
+            // Exactly 8 albums returned (the 9th and private-only are excluded).
+            if ($galleries->count() !== 8) {
+                return false;
+            }
 
-            return $galleries->count() === 8
-                && ! in_array('private/secret.jpg', $paths, true)
-                && collect($paths)->every(fn ($p) => str_starts_with($p, 'gallery/cover-'));
+            // Expected titles in DESC published_at order: i=1 is newest.
+            $expectedTitles = array_map(fn ($i) => "Album Foto {$i}", range(1, 8));
+            $expectedPaths  = array_map(fn ($i) => "gallery/cover-{$i}.jpg", range(1, 8));
+
+            $actualTitles = $galleries->pluck('title')->all();
+            $actualPaths  = $galleries->pluck('media')->flatten()->pluck('path')->all();
+
+            // 9th gallery and private album must not appear.
+            if (in_array('Album Foto 9', $actualTitles, true)) {
+                return false;
+            }
+            if (in_array('Album Privat', $actualTitles, true)) {
+                return false;
+            }
+            if (in_array('private/secret.jpg', $actualPaths, true)) {
+                return false;
+            }
+
+            // Each returned album must carry exactly one eager-loaded public cover.
+            $everyAlbumHasOnePublicCover = $galleries->every(
+                fn ($gallery) => $gallery->relationLoaded('media') && $gallery->media->count() === 1
+            );
+
+            // Exact ordered titles and exactly 8 distinct public cover paths.
+            return $everyAlbumHasOnePublicCover
+                && $actualTitles === $expectedTitles
+                && count($actualPaths) === 8
+                && $actualPaths === $expectedPaths;
         });
     }
 }
