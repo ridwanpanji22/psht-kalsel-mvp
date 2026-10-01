@@ -37,6 +37,7 @@ if (listElement instanceof HTMLElement) {
 const detailElement = document.querySelector('[data-location-detail]');
 const notFoundElement = document.querySelector('[data-location-not-found]');
 const detailMapElement = document.querySelector('#training-map-detail');
+const detailNameElement = document.querySelector('[data-location-name]');
 
 function createPopup(location) {
     const wrapper = document.createElement('div');
@@ -52,7 +53,12 @@ function createPopup(location) {
     return wrapper;
 }
 
+function setDetailName(text) {
+    if (detailNameElement instanceof HTMLElement) detailNameElement.textContent = text;
+}
+
 function showNotFound() {
+    setDetailName('Tempat latihan tidak ditemukan');
     if (detailElement instanceof HTMLElement) detailElement.hidden = true;
     if (notFoundElement instanceof HTMLElement) notFoundElement.hidden = false;
 }
@@ -61,8 +67,9 @@ function renderDetail(location) {
     if (detailElement instanceof HTMLElement) detailElement.hidden = false;
     if (notFoundElement instanceof HTMLElement) notFoundElement.hidden = true;
 
+    setDetailName(location.name);
+
     const fields = {
-        '[data-location-name]': location.name,
         '[data-location-unit]': location.unitName,
         '[data-location-address]': location.address,
         '[data-location-schedule]': location.schedule,

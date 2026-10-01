@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import vm from 'node:vm';
 
 const previewRoot = dirname(fileURLToPath(import.meta.url));
 
@@ -12,6 +13,83 @@ async function readPreview(file) {
 
 function countMatches(content, pattern) {
     return [...content.matchAll(pattern)].length;
+}
+
+// Minimal fake DOM used to execute the real `assets/locations.js` in a vm.
+// It implements only the surface that script touches: querySelector,
+// createElement, element append/textContent/hidden/href/className, and a
+// recording Leaflet stub on `window.L`.
+function createFakeDom(selectors, { search = '', leaflet = true } = {}) {
+    const mapCalls = { map: 0, tileLayer: 0, markers: [] };
+
+    class FakeElement {
+        constructor(tag = 'div') {
+            this.tagName = tag.toUpperCase();
+            this.children = [];
+            this.textContent = '';
+            this.hidden = false;
+            this.href = '';
+            this.className = '';
+            this.attributes = {};
+        }
+
+        append(...nodes) {
+            this.children.push(...nodes);
+        }
+
+        setAttribute(name, value) {
+            this.attributes[name] = value;
+        }
+    }
+
+    const elements = new Map();
+    for (const selector of selectors) elements.set(selector, new FakeElement());
+
+    const document = {
+        querySelector(selector) {
+            return elements.has(selector) ? elements.get(selector) : null;
+        },
+        createElement(tag) {
+            return new FakeElement(tag);
+        },
+    };
+
+    const window = { location: { search }, L: null };
+    if (leaflet) {
+        window.L = {
+            map() {
+                mapCalls.map += 1;
+                return { setView() { return this; } };
+            },
+            tileLayer() {
+                mapCalls.tileLayer += 1;
+                return { addTo() {} };
+            },
+            marker(position) {
+                mapCalls.markers.push(position);
+                return { addTo() { return this; }, bindPopup() { return this; }, openPopup() {} };
+            },
+        };
+    }
+
+    const context = vm.createContext({ document, window, HTMLElement: FakeElement, URLSearchParams, encodeURIComponent });
+
+    return { context, elements, mapCalls, FakeElement };
+}
+
+function runLocationsScript(source, dom) {
+    vm.runInContext(source, dom.context);
+}
+
+// Walks a fake element tree collecting every anchor's href.
+function collectHrefs(element, found = []) {
+    if (Array.isArray(element.children)) {
+        for (const child of element.children) {
+            if (child && typeof child.href === 'string' && child.href) found.push(child.href);
+            collectHrefs(child, found);
+        }
+    }
+    return found;
 }
 
 test('preview index exposes the approved shared shell and page navigation', async () => {
@@ -129,14 +207,16 @@ test('event detail includes a location map preview region', async () => {
 test('training location preview lists shared samples and links each to a detail page', async () => {
     const list = await readPreview('tempat-latihan.html');
     const detail = await readPreview('tempat-latihan-detail.html');
+    const script = await readPreview('assets/locations.js');
 
     assert.match(list, /data-training-location-list/);
     assert.match(list, /locations\.js/);
-    assert.equal(countMatches(list, /tempat-latihan-detail\.html\?id=/g), 4);
     assert.doesNotMatch(list, /id="training-map"/);
     assert.doesNotMatch(list, /leaflet@1\.9\.4/);
     assert.match(list, /Data contoh untuk preview/);
     assert.doesNotMatch(list, /telepon pribadi|nomor anggota/i);
+    // No JS means no location data; the fallback must not offer dead detail links.
+    assert.equal(countMatches(list, /tempat-latihan-detail\.html\?id=/g), 0);
 
     assert.match(detail, /id="training-map-detail"/);
     assert.match(detail, /data-location-not-found/);
@@ -147,6 +227,49 @@ test('training location preview lists shared samples and links each to a detail 
     assert.match(detail, /sha256-20nQCchB9co0qIjJZRGuk2\/Z9VM\+kNiyxNV1lvTlZBo=/);
     assert.match(detail, /locations\.js/);
     assert.equal(countMatches(detail, /<h1\b/g), 1);
+    // The single H1 lives outside the hideable detail container so the
+    // not-found state still has a visible heading.
+    const detailContainer = detail.slice(detail.indexOf('data-location-detail'));
+    const h1Index = detail.indexOf('<h1');
+    assert.ok(h1Index > -1 && h1Index < detail.indexOf('data-location-detail'), 'H1 must precede the hideable detail container');
+    assert.ok(detailContainer.includes('data-location-detail'), 'detail container must exist');
+
+    // Behavioral: execute the real script against a minimal fake DOM.
+    const listDom = createFakeDom(['[data-training-location-list]']);
+    runLocationsScript(script, listDom);
+    const listContainer = listDom.elements.get('[data-training-location-list]');
+    const hrefs = collectHrefs(listContainer);
+    assert.equal(hrefs.length, 4, 'list renders four detail links from the shared array');
+    assert.deepEqual(
+        hrefs.map((href) => href.replace('tempat-latihan-detail.html?id=', '')),
+        ['bjm', 'bjb', 'martapura', 'pelaihari'],
+    );
+
+    const detailSelectors = ['[data-location-detail]', '[data-location-not-found]', '#training-map-detail', '[data-location-name]', '[data-location-unit]', '[data-location-address]', '[data-location-schedule]'];
+
+    const validDom = createFakeDom(detailSelectors, { search: '?id=bjb' });
+    runLocationsScript(script, validDom);
+    assert.equal(validDom.elements.get('[data-location-detail]').hidden, false, 'valid id shows detail');
+    assert.equal(validDom.elements.get('[data-location-not-found]').hidden, true, 'valid id hides not-found');
+    assert.equal(validDom.elements.get('[data-location-name]').textContent, 'Tempat Latihan Banjarbaru');
+    assert.equal(validDom.elements.get('[data-location-unit]').textContent, 'Cabang Banjarbaru');
+    assert.equal(validDom.elements.get('[data-location-address]').textContent, 'Kawasan Mentaos, Banjarbaru');
+    assert.equal(validDom.elements.get('[data-location-schedule]').textContent, 'Rabu dan Sabtu, 19.30 WITA');
+    assert.equal(validDom.mapCalls.map, 1, 'valid id creates exactly one map');
+    assert.equal(validDom.mapCalls.markers.length, 1, 'valid id creates exactly one marker');
+    const [markerLatitude, markerLongitude] = validDom.mapCalls.markers[0];
+    assert.equal(markerLatitude, -3.4429, 'marker latitude matches the selected location');
+    assert.equal(markerLongitude, 114.8322, 'marker longitude matches the selected location');
+
+    for (const search of ['?id=zzz', '']) {
+        const missingDom = createFakeDom(detailSelectors, { search });
+        runLocationsScript(script, missingDom);
+        assert.equal(missingDom.elements.get('[data-location-detail]').hidden, true, `${search || 'no id'} hides detail`);
+        assert.equal(missingDom.elements.get('[data-location-not-found]').hidden, false, `${search || 'no id'} shows not-found`);
+        assert.equal(missingDom.elements.get('[data-location-name]').textContent, 'Tempat latihan tidak ditemukan', `${search || 'no id'} sets a visible not-found heading`);
+        assert.equal(missingDom.mapCalls.map, 0, `${search || 'no id'} must not create a map`);
+        assert.equal(missingDom.mapCalls.markers.length, 0, `${search || 'no id'} must not create a marker`);
+    }
 });
 
 test('profile preview is an honest editorial shell without invented history', async () => {
