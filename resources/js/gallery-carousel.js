@@ -12,16 +12,37 @@ export function initGalleryCarousels(root = document) {
         if (!scroller || items.length <= 1) return;
 
         let currentIndex = 0;
-        let isPaused = false;
         let isStopped = false;
+        let isPointerInside = false;
+        let isFocusInside = false;
         let intervalId = null;
+
+        // Reachable-position model. Cards are fixed-width with a fixed gap, so the scroller can
+        // only start a card at offsets 0..maxIndex; `scrollToIndex(items.length - 1)` would clamp
+        // to the same scroll position as `maxIndex`. With N cards visible, the last N-1 dots all
+        // map to that single terminal scroll position, which is why the index is clamped to
+        // `maxIndex` everywhere instead of wrapping around `items.length`.
+        let stride = 0;
+        let maxIndex = Math.max(0, items.length - 1);
 
         const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
+        const measureGeometry = () => {
+            const first = items[0];
+            if (!first) return;
+            const gap = parseFloat(window.getComputedStyle(scroller).columnGap) || 0;
+            const width = first.getBoundingClientRect().width;
+            stride = width + gap;
+            const visibleCount = stride > 0 ? Math.max(1, Math.round(scroller.clientWidth / stride)) : 1;
+            maxIndex = Math.max(0, items.length - visibleCount);
+        };
+
         const updateDots = (newIndex) => {
             dots.forEach((dot, idx) => {
-                const isCurrent = idx === newIndex;
-                dot.setAttribute('aria-selected', isCurrent ? 'true' : 'false');
+                // Every dot follows its own card; dots beyond `maxIndex` all describe the
+                // same terminal scroll position, so several can be `aria-current` at once.
+                const isCurrent = idx === Math.min(newIndex, maxIndex);
+                dot.setAttribute('aria-current', isCurrent ? 'true' : 'false');
                 const visual = dot.querySelector('span') ?? dot;
                 visual.classList.toggle('w-6', isCurrent);
                 visual.classList.toggle('bg-[#2162ed]', isCurrent);
@@ -31,10 +52,11 @@ export function initGalleryCarousels(root = document) {
         };
 
         const scrollToIndex = (index, announce = false) => {
-            if (index < 0) index = items.length - 1;
-            if (index >= items.length) index = 0;
+            // Clamp into the reachable range before scrolling AND before setting state, so the
+            // debounced scroll listener can never disagree with `currentIndex`.
+            const target = Math.min(Math.max(index, 0), maxIndex);
 
-            currentIndex = index;
+            currentIndex = target;
             const targetItem = items[currentIndex];
 
             if (targetItem) {
@@ -54,8 +76,9 @@ export function initGalleryCarousels(root = document) {
         };
 
         const autoAdvance = () => {
-            if (isPaused || isStopped || prefersReducedMotion.matches) return;
-            scrollToIndex(currentIndex + 1, false);
+            if (isPointerInside || isFocusInside || isStopped || prefersReducedMotion.matches) return;
+            // Wrap to the first album instead of stepping past the reachable end.
+            scrollToIndex(currentIndex >= maxIndex ? 0 : currentIndex + 1, false);
         };
 
         const startAutoplay = () => {
@@ -63,8 +86,20 @@ export function initGalleryCarousels(root = document) {
             intervalId = window.setInterval(autoAdvance, 5000);
         };
 
-        const pauseAutoplay = () => { isPaused = true; };
-        const resumeAutoplay = () => { isPaused = false; };
+        // Pause is the union of "pointer inside" and "focus inside". Resuming on pointerleave
+        // while a child still holds focus (or on focusout while the pointer is still inside)
+        // would restart autoplay under the user.
+        const pauseAutoplay = () => {
+            if (isStopped) return;
+            if (intervalId) {
+                window.clearInterval(intervalId);
+                intervalId = null;
+            }
+        };
+        const resumeAutoplayIfIdle = () => {
+            if (isStopped || isPointerInside || isFocusInside) return;
+            startAutoplay();
+        };
         const stopAutoplayPermanently = () => {
             isStopped = true;
             if (intervalId) {
@@ -76,12 +111,12 @@ export function initGalleryCarousels(root = document) {
         // Manual Navigation Handlers
         prevBtn?.addEventListener('click', () => {
             stopAutoplayPermanently();
-            scrollToIndex(currentIndex - 1, true);
+            scrollToIndex(currentIndex <= 0 ? maxIndex : currentIndex - 1, true);
         });
 
         nextBtn?.addEventListener('click', () => {
             stopAutoplayPermanently();
-            scrollToIndex(currentIndex + 1, true);
+            scrollToIndex(currentIndex >= maxIndex ? 0 : currentIndex + 1, true);
         });
 
         dots.forEach((dot, idx) => {
@@ -92,10 +127,23 @@ export function initGalleryCarousels(root = document) {
         });
 
         // Hover and Focus Pause Handlers
-        carousel.addEventListener('pointerenter', pauseAutoplay);
-        carousel.addEventListener('pointerleave', resumeAutoplay);
-        carousel.addEventListener('focusin', pauseAutoplay);
-        carousel.addEventListener('focusout', resumeAutoplay);
+        carousel.addEventListener('pointerenter', () => {
+            isPointerInside = true;
+            pauseAutoplay();
+        });
+        carousel.addEventListener('pointerleave', () => {
+            isPointerInside = false;
+            resumeAutoplayIfIdle();
+        });
+        carousel.addEventListener('focusin', () => {
+            isFocusInside = true;
+            pauseAutoplay();
+        });
+        carousel.addEventListener('focusout', (event) => {
+            if (carousel.contains(event.relatedTarget)) return;
+            isFocusInside = false;
+            resumeAutoplayIfIdle();
+        });
 
         // Scroll listener to update active dot when user manually swipes
         let scrollTimeout;
@@ -114,11 +162,21 @@ export function initGalleryCarousels(root = document) {
                     }
                 });
 
-                if (closestIndex !== currentIndex) {
-                    currentIndex = closestIndex;
+                const clampedIndex = Math.min(closestIndex, maxIndex);
+
+                if (clampedIndex !== currentIndex) {
+                    currentIndex = clampedIndex;
                     updateDots(currentIndex);
                 }
             }, 100);
+        }, { passive: true });
+
+        // Keep the reachable model in sync with the viewport (1 card mobile -> 3 cards desktop).
+        window.addEventListener('resize', () => {
+            measureGeometry();
+            if (currentIndex > maxIndex) {
+                scrollToIndex(maxIndex, false);
+            }
         }, { passive: true });
 
         // Reduced Motion Listener
@@ -130,6 +188,7 @@ export function initGalleryCarousels(root = document) {
             }
         });
 
+        measureGeometry();
         startAutoplay();
     });
 }
