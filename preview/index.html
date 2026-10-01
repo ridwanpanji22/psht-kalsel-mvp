@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Preview desain halaman publik PSHT Kalimantan Selatan.">
+    <title>Preview halaman publik | PSHT Kalimantan Selatan</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230720b0'/%3E%3Cpath d='M18 43V21h16c8 0 12 4 12 11S42 43 34 43H18Zm8-7h8c3 0 5-1 5-4s-2-4-5-4h-8v8Z' fill='white'/%3E%3C/svg%3E">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="assets/preview.css">
+    <script src="assets/preview.js" defer></script>
+    <style type="text/tailwindcss">
+        @theme {
+            --color-psht-bg: #0d1117;
+            --color-psht-deep: #0b0f16;
+            --color-psht-surface: #111722;
+            --color-psht-blue: #0720b0;
+            --color-psht-bright: #2162ed;
+            --color-psht-gold: #fbbf24;
+            --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-psht-bg font-sans text-stone-100 antialiased">
+    <header class="absolute inset-x-0 top-0 z-20">
+        <nav class="mx-auto flex h-20 max-w-6xl items-center justify-between gap-4 px-4" aria-label="Navigasi preview">
+            <a class="font-semibold text-white" href="index.html">PSHT Kalimantan Selatan</a>
+            <div class="hidden items-center gap-6 text-sm md:flex">
+                <a class="focus-ring text-stone-200 hover:text-white" href="struktur.html">Struktur</a>
+                <a class="focus-ring text-stone-200 hover:text-white" href="galeri.html">Galeri</a>
+                <a class="focus-ring text-stone-200 hover:text-white" href="kegiatan.html">Kegiatan</a>
+                <a class="focus-ring text-stone-200 hover:text-white" href="tempat-latihan.html">Tempat latihan</a>
+            </div>
+            <details class="relative md:hidden">
+                <summary class="focus-ring cursor-pointer rounded-lg border border-white/30 px-3 py-2 text-sm">Menu</summary>
+                <div class="absolute right-0 top-full mt-2 grid w-48 gap-1 rounded-2xl border border-white/10 bg-psht-surface p-2 shadow-xl">
+                    <a class="focus-ring rounded-lg px-3 py-2 text-sm" href="struktur.html">Struktur</a>
+                    <a class="focus-ring rounded-lg px-3 py-2 text-sm" href="galeri.html">Galeri</a>
+                    <a class="focus-ring rounded-lg px-3 py-2 text-sm" href="kegiatan.html">Kegiatan</a>
+                    <a class="focus-ring rounded-lg px-3 py-2 text-sm" href="tempat-latihan.html">Tempat latihan</a>
+                </div>
+            </details>
+        </nav>
+    </header>
+
+    <main>
+        <section class="relative isolate flex min-h-[82vh] items-center overflow-hidden bg-psht-bg" aria-labelledby="preview-heading">
+            <video class="absolute inset-0 -z-20 h-full w-full object-cover" aria-hidden="true" muted loop playsinline preload="metadata" poster="../public/images/hero-martial-arts-poster.webp" data-preview-video>
+                <source src="../public/videos/hero-martial-arts.mp4" type="video/mp4">
+            </video>
+            <div class="absolute inset-0 -z-10 bg-gradient-to-br from-[#04070d]/95 via-[#0d1117]/85 to-[#0d1117]/55" aria-hidden="true"></div>
+            <div class="mx-auto w-full max-w-6xl px-4 pb-14 pt-32">
+                <p class="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">Portal publik</p>
+                <h1 id="preview-heading" class="max-w-4xl text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-[3.25rem]">Pilih halaman untuk ditinjau</h1>
+                <p class="mt-5 max-w-2xl text-lg leading-8 text-stone-200">Preview visual halaman publik PSHT Kalimantan Selatan. Desain belum diterapkan ke Blade.</p>
+                <p class="mt-5 text-sm text-stone-300">Data di halaman preview adalah contoh. Aset video lokal hanya untuk evaluasi desain.</p>
+            </div>
+        </section>
+
+        <section class="border-y border-white/10 bg-psht-deep" aria-labelledby="pages-heading">
+            <div class="mx-auto max-w-6xl px-4 py-14">
+                <p class="text-sm font-semibold uppercase tracking-[0.18em] text-amber-300">Halaman publik</p>
+                <h2 id="pages-heading" class="mt-3 text-3xl font-bold text-white">Telusuri preview</h2>
+                <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <a class="preview-link" href="struktur.html"><span class="preview-link__eyebrow">Organisasi</span><h3>Struktur organisasi</h3><p>Jelajahi hierarki unit dan relasi pembinaan.</p><span class="preview-link__action">Buka preview <span aria-hidden="true">→</span></span></a>
+                    <a class="preview-link" href="galeri.html"><span class="preview-link__eyebrow">Dokumentasi</span><h3>Galeri</h3><p>Telusuri album publik dan tampilan foto.</p><span class="preview-link__action">Buka preview <span aria-hidden="true">→</span></span></a>
+                    <a class="preview-link" href="kegiatan.html"><span class="preview-link__eyebrow">Agenda</span><h3>Kegiatan</h3><p>Filter kegiatan mendatang dan arsip.</p><span class="preview-link__action">Buka preview <span aria-hidden="true">→</span></span></a>
+                    <a class="preview-link" href="kegiatan-detail.html?slug=latihan-gabungan-provinsi"><span class="preview-link__eyebrow">Agenda</span><h3>Detail kegiatan</h3><p>Baca informasi lengkap satu kegiatan.</p><span class="preview-link__action">Buka preview <span aria-hidden="true">→</span></span></a>
+                    <a class="preview-link" href="tempat-latihan.html"><span class="preview-link__eyebrow">Lokasi</span><h3>Tempat latihan</h3><p>Bandingkan jadwal, alamat, dan titik peta.</p><span class="preview-link__action">Buka preview <span aria-hidden="true">→</span></span></a>
+                    <a class="preview-link" href="profil.html"><span class="preview-link__eyebrow">Informasi</span><h3>Profil dan sejarah</h3><p>Lihat kerangka halaman editorial profil.</p><span class="preview-link__action">Buka preview <span aria-hidden="true">→</span></span></a>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="border-t border-white/10 bg-psht-bg">
+        <div class="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 text-sm text-stone-400 sm:flex-row sm:justify-between">
+            <span>PSHT Kalimantan Selatan</span><span>Preview desain lokal, belum diterapkan ke aplikasi</span>
+        </div>
+    </footer>
+</body>
+</html>

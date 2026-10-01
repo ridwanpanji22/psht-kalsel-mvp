@@ -1,0 +1,142 @@
+@font-face {
+    font-family: "Instrument Sans";
+    src: local("Instrument Sans");
+    font-display: swap;
+}
+
+:root {
+    color-scheme: dark;
+}
+
+html {
+    background: #0d1117;
+    scroll-behavior: smooth;
+}
+
+body {
+    margin: 0;
+}
+
+.focus-ring:focus-visible,
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+    outline: 2px solid #2162ed;
+    outline-offset: 3px;
+}
+
+.preview-link {
+    display: flex;
+    min-height: 15rem;
+    flex-direction: column;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    border-radius: 1rem;
+    background: #111722;
+    padding: 1.5rem;
+    transition: border-color 180ms ease, transform 180ms ease, background-color 180ms ease;
+}
+
+.preview-link:hover {
+    border-color: rgb(33 98 237 / 0.8);
+    background: #151d2b;
+    transform: translateY(-2px);
+}
+
+.preview-link__eyebrow {
+    color: #fcd34d;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.preview-link h3 {
+    margin-top: 1rem;
+    color: #fff;
+    font-size: 1.35rem;
+    font-weight: 700;
+}
+
+.preview-link p {
+    margin-top: 0.75rem;
+    color: #a8a29e;
+    line-height: 1.6;
+}
+
+.preview-link__action {
+    margin-top: auto;
+    padding-top: 1.5rem;
+    color: #60a5fa;
+    font-weight: 600;
+}
+
+.preview-shell {
+    min-height: 100dvh;
+    background:
+        radial-gradient(circle at 85% 0%, rgb(7 32 176 / 0.18), transparent 28rem),
+        #0d1117;
+}
+
+.preview-page-heading {
+    border-bottom: 1px solid rgb(255 255 255 / 0.1);
+    padding-block: 5rem 3rem;
+}
+
+.preview-kicker {
+    color: #fcd34d;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.preview-card {
+    border: 1px solid rgb(255 255 255 / 0.1);
+    border-radius: 1rem;
+    background: #111722;
+}
+
+.preview-control {
+    min-height: 2.75rem;
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 0.5rem;
+    background: rgb(255 255 255 / 0.04);
+    color: #e7e5e4;
+}
+
+.preview-control:hover {
+    border-color: #2162ed;
+    background: rgb(33 98 237 / 0.12);
+}
+
+.preview-control[aria-pressed="true"],
+.preview-control[data-active="true"] {
+    border-color: #2162ed;
+    background: #0720b0;
+    color: #fff;
+}
+
+.preview-note {
+    border-left: 3px solid #fbbf24;
+    background: rgb(251 191 36 / 0.07);
+}
+
+[hidden] {
+    display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html {
+        scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
