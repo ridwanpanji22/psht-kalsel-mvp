@@ -91,15 +91,24 @@ test('event previews expose time filters, localized details, and working navigat
     assert.match(index, /src="\.\.\/public\/images\/hero-martial-arts-poster\.webp"/);
     assert.match(detail, /data-event-detail-cover/);
 
-    // Compact rows: status/when live on the <li>, and one cover sits inside its nested link,
-    // so filtering hides the whole list item (events.js toggles hidden on the matched element).
+    // Compact rows: status/when live on the <li>, and exactly one cover sits inside the
+    // nested event link body (not merely somewhere in the <li>), so filtering hides the
+    // whole list item (events.js toggles hidden on the element matched by data-event-status).
     const compactRows = [...index.matchAll(/<li data-event-status="(?:upcoming|past)" data-event-when="(?:upcoming|past)">([\s\S]*?)<\/li>/g)];
     assert.equal(compactRows.length, 2);
     for (const [, row] of compactRows) {
-        assert.match(row, /<a\b[^>]*href="kegiatan-detail\.html\?slug=/);
         assert.doesNotMatch(row, /<a\b[^>]*data-event-status/);
         assert.doesNotMatch(row, /<a\b[^>]*data-event-when/);
-        assert.equal(countMatches(row, /data-event-cover/g), 1);
+
+        // Capture the nested event anchor's opening tag and its body up to the first closing anchor.
+        const anchor = [...row.matchAll(/<a\b[^>]*href="kegiatan-detail\.html\?slug=[^"]*"[^>]*>([\s\S]*?)<\/a>/g)];
+        assert.equal(anchor.length, 1);
+        const linkBody = anchor[0][1];
+        assert.equal(countMatches(linkBody, /data-event-cover/g), 1);
+
+        // The cover must not be rescued by anything outside the link: no other cover in the row.
+        const outsideLink = row.replace(anchor[0][0], '');
+        assert.equal(countMatches(outsideLink, /data-event-cover/g), 0);
     }
 });
 
