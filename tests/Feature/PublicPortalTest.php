@@ -291,6 +291,8 @@ class PublicPortalTest extends TestCase
         $response->assertSee('data-carousel-next', false);
         $response->assertSee('data-carousel-dot="0"', false);
         $response->assertSee('aria-roledescription="carousel"', false);
+        $response->assertSee('data-carousel-status', false);
+        $response->assertSee('aria-live="polite"', false);
         $response->assertDontSee('lg:col-span-2', false);
         $response->assertDontSee('lg:row-span-2', false);
     }
