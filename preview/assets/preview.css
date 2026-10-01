@@ -78,6 +78,22 @@ summary:focus-visible {
         #0d1117;
 }
 
+.organization-tree,
+.tree-children {
+    list-style: none;
+    padding-left: 0;
+}
+
+.tree-children {
+    margin-left: 0.75rem;
+    border-left: 1px solid rgb(255 255 255 / 0.15);
+    padding-left: 1rem;
+}
+
+.tree-node[hidden] {
+    display: none !important;
+}
+
 .preview-page-heading {
     border-bottom: 1px solid rgb(255 255 255 / 0.1);
     padding-block: 5rem 3rem;

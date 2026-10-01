@@ -30,3 +30,19 @@ test('preview index exposes the approved shared shell and page navigation', asyn
 
     assert.doesNotMatch(html, /[—–]/);
 });
+
+test('structure preview preserves unit hierarchy and supervision semantics', async () => {
+    const html = await readPreview('struktur.html');
+
+    assert.match(html, /id="unit-search"/);
+    assert.match(html, /id="organization-tree"/);
+    assert.match(html, /Dibina oleh Cabang Banjarmasin/);
+    assert.match(html, /data-unit-type="provinsi"/);
+    assert.match(html, /data-unit-type="cabang"/);
+    assert.match(html, /data-unit-type="ranting"/);
+    assert.match(html, /data-unit-type="rayon"/);
+    assert.match(html, /data-unit-type="ukm"/);
+    assert.match(html, /data-unit-type="komisariat"/);
+    assert.match(html, /Data contoh untuk preview/);
+    assert.match(html, /aria-live="polite"/);
+});

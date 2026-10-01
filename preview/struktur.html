@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Preview struktur organisasi PSHT Kalimantan Selatan.">
+    <title>Struktur organisasi | Preview PSHT Kalimantan Selatan</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230720b0'/%3E%3Cpath d='M18 43V21h16c8 0 12 4 12 11S42 43 34 43H18Zm8-7h8c3 0 5-1 5-4s-2-4-5-4h-8v8Z' fill='white'/%3E%3C/svg%3E">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="assets/preview.css">
+    <script src="assets/preview.js" defer></script>
+    <script src="assets/structure.js" defer></script>
+    <style type="text/tailwindcss">@theme { --color-psht-bg:#0d1117; --color-psht-deep:#0b0f16; --color-psht-surface:#111722; --color-psht-blue:#0720b0; --color-psht-bright:#2162ed; --color-psht-gold:#fbbf24; --font-sans:'Instrument Sans',ui-sans-serif,system-ui,sans-serif; }</style>
+</head>
+<body class="preview-shell font-sans text-stone-100 antialiased">
+<header class="border-b border-white/10 bg-psht-bg/95 backdrop-blur">
+    <nav class="mx-auto flex min-h-20 max-w-6xl items-center justify-between gap-4 px-4" aria-label="Navigasi preview">
+        <a href="index.html" class="focus-ring font-semibold text-white">PSHT Kalimantan Selatan</a>
+        <div class="hidden items-center gap-6 text-sm md:flex"><a class="focus-ring text-white" aria-current="page" href="struktur.html">Struktur</a><a class="focus-ring text-stone-300 hover:text-white" href="galeri.html">Galeri</a><a class="focus-ring text-stone-300 hover:text-white" href="kegiatan.html">Kegiatan</a><a class="focus-ring text-stone-300 hover:text-white" href="tempat-latihan.html">Tempat latihan</a></div>
+        <details class="relative md:hidden"><summary class="focus-ring cursor-pointer rounded-lg border border-white/30 px-3 py-2 text-sm">Menu</summary><div class="absolute right-0 top-full z-20 mt-2 grid w-48 gap-1 rounded-2xl border border-white/10 bg-psht-surface p-2 shadow-xl"><a class="rounded-lg bg-psht-blue px-3 py-2 text-sm" href="struktur.html">Struktur</a><a class="rounded-lg px-3 py-2 text-sm" href="galeri.html">Galeri</a><a class="rounded-lg px-3 py-2 text-sm" href="kegiatan.html">Kegiatan</a><a class="rounded-lg px-3 py-2 text-sm" href="tempat-latihan.html">Tempat latihan</a></div></details>
+    </nav>
+</header>
+<main>
+    <section class="preview-page-heading" aria-labelledby="structure-heading"><div class="mx-auto max-w-6xl px-4"><p class="preview-kicker">Hierarki formal</p><h1 id="structure-heading" class="mt-3 max-w-3xl text-4xl font-bold tracking-tight text-white sm:text-5xl">Struktur organisasi</h1><p class="mt-4 max-w-2xl text-lg leading-8 text-stone-300">Telusuri hubungan formal antarunit dan cabang pembina di Kalimantan Selatan.</p><p class="mt-4 inline-flex rounded-lg border border-amber-300/25 bg-amber-300/5 px-3 py-2 text-sm text-amber-200">Data contoh untuk preview</p></div></section>
+
+    <section class="mx-auto max-w-6xl px-4 py-12" aria-labelledby="tree-heading">
+        <div class="grid items-start gap-8 lg:grid-cols-[18rem_minmax(0,1fr)]">
+            <aside class="preview-card p-5 lg:sticky lg:top-6"><label for="unit-search" class="block text-sm font-semibold text-white">Cari unit organisasi</label><input id="unit-search" type="search" aria-label="Cari unit organisasi" placeholder="Nama Cabang, Ranting, Rayon..." class="preview-control mt-3 w-full px-3 py-2.5 placeholder:text-stone-500"><div class="mt-5 border-t border-white/10 pt-5"><p class="text-xs font-semibold uppercase tracking-[0.16em] text-stone-400">Jenis unit</p><ul class="mt-3 space-y-2 text-sm text-stone-300"><li>Provinsi</li><li>Cabang</li><li>Ranting</li><li>Rayon</li><li>UKM</li><li>Komisariat</li></ul></div></aside>
+            <div>
+                <div class="flex items-end justify-between gap-4"><div><p class="preview-kicker">Kalimantan Selatan</p><h2 id="tree-heading" class="mt-2 text-2xl font-bold text-white">Peta hierarki unit</h2></div><p id="search-result" class="text-sm text-stone-400" aria-live="polite">6 unit contoh ditampilkan</p></div>
+                <ol id="organization-tree" class="organization-tree mt-7 space-y-4">
+                    <li data-unit-name="Pengurus Provinsi Kalimantan Selatan" data-unit-type="provinsi" class="tree-node preview-card border-l-4 border-l-[#2162ed] p-5">
+                        <div class="flex flex-wrap items-start justify-between gap-3"><div><p class="text-xs font-bold uppercase tracking-[0.16em] text-blue-300">Provinsi</p><h3 class="mt-2 text-xl font-bold text-white">Pengurus Provinsi Kalimantan Selatan</h3></div><span class="rounded-lg border border-blue-400/25 bg-blue-400/10 px-3 py-1 text-xs text-blue-200">Induk formal</span></div>
+                        <ol class="tree-children mt-5 space-y-4">
+                            <li data-unit-name="Cabang Banjarmasin" data-unit-type="cabang" class="tree-node preview-card p-5"><p class="text-xs font-bold uppercase tracking-[0.16em] text-amber-300">Cabang</p><h4 class="mt-2 text-lg font-bold text-white">Cabang Banjarmasin</h4>
+                                <ol class="tree-children mt-4 grid gap-3 sm:grid-cols-2">
+                                    <li data-unit-name="Ranting Banjarmasin Timur" data-unit-type="ranting" class="tree-node rounded-2xl border border-white/10 bg-white/[0.03] p-4"><p class="text-xs uppercase tracking-wider text-stone-400">Ranting</p><h5 class="mt-2 font-semibold text-white">Ranting Banjarmasin Timur</h5></li>
+                                    <li data-unit-name="Rayon Veteran" data-unit-type="rayon" class="tree-node rounded-2xl border border-white/10 bg-white/[0.03] p-4"><p class="text-xs uppercase tracking-wider text-stone-400">Rayon</p><h5 class="mt-2 font-semibold text-white">Rayon Veteran</h5></li>
+                                </ol>
+                            </li>
+                            <li data-unit-name="UKM Kampus Lambung Mangkurat" data-unit-type="ukm" class="tree-node preview-card p-5"><p class="text-xs font-bold uppercase tracking-[0.16em] text-amber-300">UKM</p><h4 class="mt-2 text-lg font-bold text-white">UKM Kampus Lambung Mangkurat</h4><p class="mt-3 text-sm text-stone-300">Dibina oleh Cabang Banjarmasin</p></li>
+                            <li data-unit-name="Komisariat Banjarbaru" data-unit-type="komisariat" class="tree-node preview-card p-5"><p class="text-xs font-bold uppercase tracking-[0.16em] text-amber-300">Komisariat</p><h4 class="mt-2 text-lg font-bold text-white">Komisariat Banjarbaru</h4></li>
+                        </ol>
+                    </li>
+                </ol>
+            </div>
+        </div>
+    </section>
+</main>
+<footer class="border-t border-white/10 bg-psht-bg"><div class="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 text-sm text-stone-400 sm:flex-row sm:justify-between"><a class="focus-ring hover:text-white" href="index.html">Kembali ke index preview</a><span>Preview struktur organisasi</span></div></footer>
+</body>
+</html>
