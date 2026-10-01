@@ -111,3 +111,25 @@ test('profile preview is an honest editorial shell without invented history', as
     assert.match(html, /Contoh konten preview, ganti dengan naskah profil terbit/);
     assert.doesNotMatch(html, /(?:berdiri|didirikan) pada tahun \d{4}|memiliki [\d.]+ anggota|meraih penghargaan/i);
 });
+
+test('every preview page has one heading and all local links and assets resolve', async () => {
+    const { readdir, stat } = await import('node:fs/promises');
+    const { resolve } = await import('node:path');
+    const files = (await readdir(previewRoot)).filter((file) => file.endsWith('.html'));
+
+    assert.equal(files.length, 7);
+
+    for (const file of files) {
+        const html = await readPreview(file);
+        assert.equal(countMatches(html, /<h1\b/g), 1, `${file} must have one H1`);
+        assert.doesNotMatch(html, /[—–]/, `${file} must not contain prohibited dash punctuation`);
+
+        for (const [, attribute, value] of html.matchAll(/\b(href|src)="([^"]+)"/g)) {
+            if (/^(?:https?:|data:|#|mailto:|tel:)/i.test(value)) continue;
+            const pathname = value.split(/[?#]/, 1)[0];
+            if (!pathname) continue;
+            const target = resolve(previewRoot, pathname);
+            assert.ok((await stat(target)).isFile(), `${file} has unresolved ${attribute}: ${value}`);
+        }
+    }
+});
