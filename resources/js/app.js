@@ -26,6 +26,28 @@ if (mapElement instanceof HTMLElement && locationDataElement instanceof HTMLScri
     }
 }
 
+const heroVideo = document.querySelector('[data-hero-video]');
+
+if (heroVideo instanceof HTMLVideoElement) {
+    const motionPreference = window.matchMedia('(prefers-reduced-motion: no-preference)');
+
+    const syncHeroVideoPlayback = (matches) => {
+        if (!matches) {
+            heroVideo.pause();
+
+            return;
+        }
+
+        heroVideo.play().catch(() => {});
+    };
+
+    syncHeroVideoPlayback(motionPreference.matches);
+
+    motionPreference.addEventListener('change', (event) => {
+        syncHeroVideoPlayback(event.matches);
+    });
+}
+
 function escapeHtml(value) {
     return String(value).replace(/[&<>"']/g, (character) => ({
         '&': '&amp;',

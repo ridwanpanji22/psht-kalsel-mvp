@@ -71,6 +71,7 @@ Not implemented in this MVP: correspondence/signature, finance ledgers/reports, 
 - Provide official member-number format/validation. Current implementation uses a globally unique opaque value, maximum 100 characters; this is provisional.
 - Decide required member fields, duplicate-review workflow, membership transition set, data correction/deletion/retention policy, and privacy/legal basis.
 - Decide allowed public fields, content reviewers, public media processing/moderation and operational content owner.
+- Confirm publication rights and consent for the homepage hero video and its poster, including every identifiable person shown. Until confirmed in writing, the hero ships as poster-only with no video source or autoplay (see Release blockers).
 - Choose map tile provider, acceptable usage policy, production attribution text, and tile service configuration. Leaflet frontend has no tile URL/provider configured; do not publish production locations on an unconfigured basemap.
 - Verify actual shared-hosting PHP/extensions, MySQL, HTTPS, cron, SMTP, writable directories, resources, off-host encrypted backup, restore, operational owner, pilot cohort, SLA/RPO/RTO.
 
@@ -86,6 +87,8 @@ Until each decision is approved, its dependent path remains development-only and
 - `.env` and secrets must never be committed. No production credential/database has been entered by setup.
 
 ### Release blockers
+
+Before production deployment the owner must explicitly confirm the publication rights for the homepage hero media and the consent of every identifiable person shown in it. The presence of an asset in the repository is not approval to publish it: an asset being committed, referenced, or rendered in a build proves nothing about rights or consent. Where consent is not yet recorded, the homepage hero must ship with the poster image fallback only, with no video source and no autoplay, until the owner signs off. Do not publish to production or claim release approval from asset presence alone.
 
 Production/pilot remains blocked until all owner decisions above are recorded, the MySQL/shared-hosting environment passes the same migrations and browser smoke, a scheduled cron run is evidenced, and an encrypted off-host backup is restored into isolated staging. The application has no configured map tile provider, SMTP, production database, initial production operator, or backup destination.
 

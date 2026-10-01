@@ -32,7 +32,7 @@
 
 @section('content')
     <section class="relative isolate flex min-h-[85vh] items-center overflow-hidden bg-[#0d1117]" aria-labelledby="hero-heading">
-        <video class="absolute inset-0 -z-20 h-full w-full object-cover" aria-hidden="true" muted loop playsinline preload="metadata" poster="{{ asset('images/hero-martial-arts-poster.webp') }}">
+        <video class="absolute inset-0 -z-20 h-full w-full object-cover" data-hero-video aria-hidden="true" muted loop playsinline preload="metadata" poster="{{ asset('images/hero-martial-arts-poster.webp') }}">
             <source src="{{ asset('videos/hero-martial-arts.mp4') }}" type="video/mp4">
         </video>
         <div class="absolute inset-0 -z-10 bg-gradient-to-br from-[#04070d]/95 via-[#0d1117]/80 to-[#0d1117]/40" aria-hidden="true"></div>
@@ -42,7 +42,7 @@
             <h1 id="hero-heading" class="mt-4 max-w-3xl text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl">Persaudaraan dan pembinaan di Kalimantan Selatan.</h1>
             <p class="mt-6 max-w-2xl text-lg leading-8 text-stone-200">Portal resmi PSHT Kalimantan Selatan untuk mengenal organisasi, kegiatan, galeri, dan tempat latihan.</p>
             <div class="mt-9 flex flex-wrap gap-3">
-                <a href="{{ route('public.organization.index') }}" class="rounded-md bg-amber-400 px-5 py-3 font-semibold text-[#0d1117] hover:bg-amber-300 focus:outline-2 focus:outline-offset-2 focus:outline-amber-300">Jelajahi struktur</a>
+                <a href="{{ route('public.organization.index') }}" class="rounded-md bg-[#0720b0] px-5 py-3 font-semibold text-white hover:bg-[#2162ed] focus:bg-[#2162ed] focus:outline-2 focus:outline-offset-2 focus:outline-[#2162ed]">Jelajahi struktur</a>
                 <a href="{{ route('public.training-locations.index') }}" class="rounded-md border border-white/40 px-5 py-3 font-semibold text-white hover:bg-white/10 focus:outline-2 focus:outline-offset-2 focus:outline-amber-300">Temukan tempat latihan</a>
             </div>
         </div>
