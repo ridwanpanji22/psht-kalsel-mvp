@@ -182,4 +182,84 @@ class PublicPortalTest extends TestCase
             ->assertSee('Latihan Banjarbaru')
             ->assertDontSee('Nama Anggota Privat');
     }
+
+    public function test_homepage_hero_uses_local_media_and_expected_structure(): void
+    {
+        $response = $this->get(route('public.home'))->assertOk();
+
+        $response->assertSee('<h1', false);
+        $this->assertSame(1, substr_count($response->getContent(), '<h1'));
+
+        $response->assertSee('Persaudaraan dan pembinaan di Kalimantan Selatan.', false);
+        $response->assertSee('Portal resmi PSHT Kalimantan Selatan untuk mengenal organisasi, kegiatan, galeri, dan tempat latihan.', false);
+
+        $response->assertSee('videos/hero-martial-arts.mp4', false);
+        $response->assertSee('images/hero-martial-arts-poster.webp', false);
+        $response->assertSee('preload="metadata"', false);
+        $response->assertSee('muted', false);
+        $response->assertSee('playsinline', false);
+        $response->assertSee('loop', false);
+        $response->assertSee('aria-hidden="true"', false);
+        $response->assertDontSee(' autoplay', false);
+
+        $response->assertSee('Jelajahi struktur', false);
+        $response->assertSee('Temukan tempat latihan', false);
+        $response->assertSee(route('public.organization.index'), false);
+        $response->assertSee(route('public.training-locations.index'), false);
+        $response->assertSee(route('public.events.index'), false);
+        $response->assertSee(route('public.galleries.index'), false);
+    }
+
+    public function test_homepage_renders_empty_states_when_no_content_published(): void
+    {
+        $this->get(route('public.home'))
+            ->assertOk()
+            ->assertSee('Informasi sejarah belum diterbitkan.')
+            ->assertSee('Belum ada kegiatan mendatang.')
+            ->assertSee('Belum ada dokumentasi yang diterbitkan.')
+            ->assertSee('Informasi tempat latihan belum tersedia.');
+    }
+
+    public function test_homepage_shows_verified_locations_only(): void
+    {
+        TrainingLocation::factory()->create([
+            'name' => 'Latihan Terverifikasi',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'verified_at' => now(),
+        ]);
+        TrainingLocation::factory()->create([
+            'name' => 'Latihan Belum Verifikasi',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'verified_at' => null,
+        ]);
+
+        $this->get(route('public.home'))
+            ->assertOk()
+            ->assertSee('Latihan Terverifikasi')
+            ->assertDontSee('Latihan Belum Verifikasi');
+    }
+
+    public function test_homepage_uses_homepage_navigation_variant(): void
+    {
+        $this->get(route('public.home'))
+            ->assertOk()
+            ->assertSee('<details', false)
+            ->assertSee('max-w-none p-0', false);
+    }
+
+    public function test_events_page_keeps_shared_navigation_and_no_homepage_video(): void
+    {
+        $this->get(route('public.events.index'))
+            ->assertOk()
+            ->assertSee('Navigasi utama')
+            ->assertSee('Struktur')
+            ->assertSee('Galeri')
+            ->assertSee('Kegiatan')
+            ->assertSee('Tempat latihan')
+            ->assertSee('mx-auto max-w-6xl px-4 py-10', false)
+            ->assertDontSee('hero-martial-arts.mp4')
+            ->assertDontSee('<details', false);
+    }
 }
