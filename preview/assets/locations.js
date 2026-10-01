@@ -38,6 +38,7 @@ const detailElement = document.querySelector('[data-location-detail]');
 const notFoundElement = document.querySelector('[data-location-not-found]');
 const detailMapElement = document.querySelector('#training-map-detail');
 const detailNameElement = document.querySelector('[data-location-name]');
+const detailKickerElement = document.querySelector('[data-location-kicker]');
 
 function createPopup(location) {
     const wrapper = document.createElement('div');
@@ -57,8 +58,13 @@ function setDetailName(text) {
     if (detailNameElement instanceof HTMLElement) detailNameElement.textContent = text;
 }
 
+function setDetailKicker(text) {
+    if (detailKickerElement instanceof HTMLElement) detailKickerElement.textContent = text;
+}
+
 function showNotFound() {
     setDetailName('Tempat latihan tidak ditemukan');
+    setDetailKicker('Lokasi tidak tersedia');
     if (detailElement instanceof HTMLElement) detailElement.hidden = true;
     if (notFoundElement instanceof HTMLElement) notFoundElement.hidden = false;
 }
@@ -68,6 +74,7 @@ function renderDetail(location) {
     if (notFoundElement instanceof HTMLElement) notFoundElement.hidden = true;
 
     setDetailName(location.name);
+    setDetailKicker('Lokasi latihan');
 
     const fields = {
         '[data-location-unit]': location.unitName,

@@ -227,6 +227,10 @@ test('training location preview lists shared samples and links each to a detail 
     assert.match(detail, /sha256-20nQCchB9co0qIjJZRGuk2\/Z9VM\+kNiyxNV1lvTlZBo=/);
     assert.match(detail, /locations\.js/);
     assert.equal(countMatches(detail, /<h1\b/g), 1);
+    // The kicker is state-aware and must not claim verification when the
+    // location is missing.
+    assert.match(detail, /data-location-kicker/);
+    assert.doesNotMatch(detail, /Lokasi terverifikasi/);
     // The single H1 lives outside the hideable detail container so the
     // not-found state still has a visible heading.
     const detailContainer = detail.slice(detail.indexOf('data-location-detail'));
@@ -245,13 +249,14 @@ test('training location preview lists shared samples and links each to a detail 
         ['bjm', 'bjb', 'martapura', 'pelaihari'],
     );
 
-    const detailSelectors = ['[data-location-detail]', '[data-location-not-found]', '#training-map-detail', '[data-location-name]', '[data-location-unit]', '[data-location-address]', '[data-location-schedule]'];
+    const detailSelectors = ['[data-location-detail]', '[data-location-not-found]', '#training-map-detail', '[data-location-name]', '[data-location-kicker]', '[data-location-unit]', '[data-location-address]', '[data-location-schedule]'];
 
     const validDom = createFakeDom(detailSelectors, { search: '?id=bjb' });
     runLocationsScript(script, validDom);
     assert.equal(validDom.elements.get('[data-location-detail]').hidden, false, 'valid id shows detail');
     assert.equal(validDom.elements.get('[data-location-not-found]').hidden, true, 'valid id hides not-found');
     assert.equal(validDom.elements.get('[data-location-name]').textContent, 'Tempat Latihan Banjarbaru');
+    assert.equal(validDom.elements.get('[data-location-kicker]').textContent, 'Lokasi latihan', 'valid id sets the location kicker');
     assert.equal(validDom.elements.get('[data-location-unit]').textContent, 'Cabang Banjarbaru');
     assert.equal(validDom.elements.get('[data-location-address]').textContent, 'Kawasan Mentaos, Banjarbaru');
     assert.equal(validDom.elements.get('[data-location-schedule]').textContent, 'Rabu dan Sabtu, 19.30 WITA');
@@ -267,6 +272,7 @@ test('training location preview lists shared samples and links each to a detail 
         assert.equal(missingDom.elements.get('[data-location-detail]').hidden, true, `${search || 'no id'} hides detail`);
         assert.equal(missingDom.elements.get('[data-location-not-found]').hidden, false, `${search || 'no id'} shows not-found`);
         assert.equal(missingDom.elements.get('[data-location-name]').textContent, 'Tempat latihan tidak ditemukan', `${search || 'no id'} sets a visible not-found heading`);
+        assert.equal(missingDom.elements.get('[data-location-kicker]').textContent, 'Lokasi tidak tersedia', `${search || 'no id'} sets an honest not-found kicker`);
         assert.equal(missingDom.mapCalls.map, 0, `${search || 'no id'} must not create a map`);
         assert.equal(missingDom.mapCalls.markers.length, 0, `${search || 'no id'} must not create a marker`);
     }
