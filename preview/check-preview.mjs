@@ -149,6 +149,33 @@ test('gallery preview provides functional pagination and lightbox navigation con
     assert.match(html, /data-lightbox-next/);
 });
 
+test('gallery lightbox dialog is centered by its own positioning contract', async () => {
+    const css = await readPreview('assets/preview.css');
+
+    const rule = css.match(/\.gallery-dialog\s*\{([^}]*)\}/);
+    assert.ok(rule, '.gallery-dialog block must exist in preview.css');
+
+    const body = rule[1];
+    const declaration = (property) => {
+        const match = body.match(new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, 'm'));
+        return match ? match[1].trim() : null;
+    };
+
+    // A native <dialog> shown with showModal() is positioned by the user-agent.
+    // The project must own the centering so the wide dialog does not pin to the
+    // user-agent default edges.
+    assert.equal(declaration('position'), 'fixed', '.gallery-dialog must declare fixed positioning');
+    assert.equal(declaration('inset'), '0', '.gallery-dialog must declare zero inset');
+    assert.equal(declaration('margin'), 'auto', '.gallery-dialog must declare automatic margin');
+
+    // The fix must retain the framing rules that keep the dialog usable.
+    assert.equal(declaration('overflow'), 'auto', '.gallery-dialog must keep scrolling overflow');
+    assert.match(body, /width\s*:\s*min\(72rem,\s*calc\(100vw - 2rem\)\)/, 'width rule must be retained');
+    assert.match(body, /max-height\s*:\s*calc\(100dvh - 2rem\)/, 'max-height rule must be retained');
+    assert.match(body, /border-radius\s*:\s*1rem/, 'border-radius rule must be retained');
+    assert.match(body, /background\s*:\s*#111722/, 'background rule must be retained');
+});
+
 test('event previews expose time filters, localized details, and working navigation', async () => {
     const index = await readPreview('kegiatan.html');
     const detail = await readPreview('kegiatan-detail.html');
