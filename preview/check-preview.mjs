@@ -126,18 +126,27 @@ test('event detail includes a location map preview region', async () => {
     assert.match(detail, /aria-label="Peta lokasi kegiatan"/);
 });
 
-test('training location preview pins Leaflet, exposes verified samples, and preserves attribution', async () => {
-    const html = await readPreview('tempat-latihan.html');
+test('training location preview lists shared samples and links each to a detail page', async () => {
+    const list = await readPreview('tempat-latihan.html');
+    const detail = await readPreview('tempat-latihan-detail.html');
 
-    assert.match(html, /id="training-map"/);
-    assert.match(html, /leaflet@1\.9\.4\/dist\/leaflet\.css/);
-    assert.match(html, /leaflet@1\.9\.4\/dist\/leaflet\.js/);
-    assert.match(html, /sha256-p4NxAoJBhIIN\+hmNHrzRCf9tD\/miZyoHS5obTRR9BMY=/);
-    assert.match(html, /sha256-20nQCchB9co0qIjJZRGuk2\/Z9VM\+kNiyxNV1lvTlZBo=/);
-    assert.match(html, /OpenStreetMap contributors/);
-    assert.equal(countMatches(html, /data-location-id=/g), 4);
-    assert.match(html, /Data contoh untuk preview/);
-    assert.doesNotMatch(html, /telepon pribadi|nomor anggota/i);
+    assert.match(list, /data-training-location-list/);
+    assert.match(list, /locations\.js/);
+    assert.equal(countMatches(list, /tempat-latihan-detail\.html\?id=/g), 4);
+    assert.doesNotMatch(list, /id="training-map"/);
+    assert.doesNotMatch(list, /leaflet@1\.9\.4/);
+    assert.match(list, /Data contoh untuk preview/);
+    assert.doesNotMatch(list, /telepon pribadi|nomor anggota/i);
+
+    assert.match(detail, /id="training-map-detail"/);
+    assert.match(detail, /data-location-not-found/);
+    assert.match(detail, /OpenStreetMap contributors/);
+    assert.match(detail, /leaflet@1\.9\.4\/dist\/leaflet\.css/);
+    assert.match(detail, /leaflet@1\.9\.4\/dist\/leaflet\.js/);
+    assert.match(detail, /sha256-p4NxAoJBhIIN\+hmNHrzRCf9tD\/miZyoHS5obTRR9BMY=/);
+    assert.match(detail, /sha256-20nQCchB9co0qIjJZRGuk2\/Z9VM\+kNiyxNV1lvTlZBo=/);
+    assert.match(detail, /locations\.js/);
+    assert.equal(countMatches(detail, /<h1\b/g), 1);
 });
 
 test('profile preview is an honest editorial shell without invented history', async () => {
@@ -162,7 +171,7 @@ test('every preview page has one heading and all local links and assets resolve'
     const { resolve } = await import('node:path');
     const files = (await readdir(previewRoot)).filter((file) => file.endsWith('.html'));
 
-    assert.equal(files.length, 7);
+    assert.equal(files.length, 8);
 
     for (const file of files) {
         const html = await readPreview(file);

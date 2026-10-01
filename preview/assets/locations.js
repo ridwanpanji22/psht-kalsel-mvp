@@ -5,8 +5,38 @@ const locations = [
     { id: 'pelaihari', name: 'Tempat Latihan Pelaihari', address: 'Kawasan Angsau, Pelaihari', schedule: 'Selasa dan Sabtu, 20.00 WITA', latitude: -3.7987, longitude: 114.7783, unitName: 'Cabang Tanah Laut' },
 ];
 
-const mapElement = document.querySelector('#training-map');
-const locationButtons = [...document.querySelectorAll('[data-location-id]')];
+const listElement = document.querySelector('[data-training-location-list]');
+
+if (listElement instanceof HTMLElement) {
+    locations.forEach((location) => {
+        const item = document.createElement('li');
+        const link = document.createElement('a');
+        const unit = document.createElement('span');
+        const name = document.createElement('span');
+        const address = document.createElement('span');
+        const schedule = document.createElement('span');
+
+        link.href = `tempat-latihan-detail.html?id=${encodeURIComponent(location.id)}`;
+        link.className = 'preview-card focus-ring block h-full w-full p-5 text-left hover:border-[#2162ed]';
+        unit.className = 'text-xs font-bold uppercase tracking-[0.14em] text-amber-300';
+        name.className = 'mt-2 block text-lg font-semibold text-white';
+        address.className = 'mt-2 block text-sm text-stone-400';
+        schedule.className = 'mt-3 block text-sm text-stone-300';
+
+        unit.textContent = location.unitName;
+        name.textContent = location.name;
+        address.textContent = location.address;
+        schedule.textContent = location.schedule;
+
+        link.append(unit, name, address, schedule);
+        item.append(link);
+        listElement.append(item);
+    });
+}
+
+const detailElement = document.querySelector('[data-location-detail]');
+const notFoundElement = document.querySelector('[data-location-not-found]');
+const detailMapElement = document.querySelector('#training-map-detail');
 
 function createPopup(location) {
     const wrapper = document.createElement('div');
@@ -22,29 +52,47 @@ function createPopup(location) {
     return wrapper;
 }
 
-if (mapElement instanceof HTMLElement && window.L) {
-    const map = L.map(mapElement, { scrollWheelZoom: false }).setView([-3.3, 114.6], 9);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-    }).addTo(map);
+function showNotFound() {
+    if (detailElement instanceof HTMLElement) detailElement.hidden = true;
+    if (notFoundElement instanceof HTMLElement) notFoundElement.hidden = false;
+}
 
-    const markers = new Map();
-    locations.forEach((location) => {
-        const marker = L.marker([location.latitude, location.longitude]).addTo(map).bindPopup(createPopup(location));
-        markers.set(location.id, marker);
+function renderDetail(location) {
+    if (detailElement instanceof HTMLElement) detailElement.hidden = false;
+    if (notFoundElement instanceof HTMLElement) notFoundElement.hidden = true;
+
+    const fields = {
+        '[data-location-name]': location.name,
+        '[data-location-unit]': location.unitName,
+        '[data-location-address]': location.address,
+        '[data-location-schedule]': location.schedule,
+    };
+
+    Object.entries(fields).forEach(([selector, value]) => {
+        const target = document.querySelector(selector);
+        if (target instanceof HTMLElement) target.textContent = value;
     });
 
-    function activateLocation(id) {
-        const location = locations.find((item) => item.id === id);
-        const marker = markers.get(id);
-        if (!location || !marker) return;
+    if (detailMapElement instanceof HTMLElement && window.L) {
+        const leaflet = window.L;
+        const map = leaflet.map(detailMapElement, { scrollWheelZoom: false }).setView([location.latitude, location.longitude], 14);
 
-        locationButtons.forEach((button) => button.setAttribute('aria-pressed', button.dataset.locationId === id ? 'true' : 'false'));
-        map.setView([location.latitude, location.longitude], 14);
-        marker.openPopup();
+        leaflet.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        }).addTo(map);
+
+        leaflet.marker([location.latitude, location.longitude]).addTo(map).bindPopup(createPopup(location)).openPopup();
     }
+}
 
-    locationButtons.forEach((button) => button.addEventListener('click', () => activateLocation(button.dataset.locationId)));
-    activateLocation(locations[0].id);
+if (detailElement instanceof HTMLElement || detailMapElement instanceof HTMLElement) {
+    const selectedId = new URLSearchParams(window.location.search).get('id');
+    const location = locations.find((item) => item.id === selectedId);
+
+    if (location) {
+        renderDetail(location);
+    } else {
+        showNotFound();
+    }
 }
