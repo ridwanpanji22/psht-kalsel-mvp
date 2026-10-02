@@ -60,17 +60,19 @@ Menerapkan tampilan dan interaksi preview yang telah disetujui ke portal MVP Bla
 
 ### 3.2 Gallery category
 
-- Tambah nullable `galleries.category` yang hanya menerima `latihan`, `kegiatan`, `pembinaan` melalui backed enum.
+- Tambah nullable `galleries.category` (`VARCHAR`) yang hanya menerima enum backed `App\Enums\GalleryCategory`: `latihan`, `kegiatan`, `pembinaan`.
 - Null diperbolehkan untuk mempertahankan semua row lama tanpa tebakan atau backfill.
+- Database check constraint menerima `NULL` atau tepat tiga nilai kategori. Tambah index gabungan untuk query daftar publik `(status, category, published_at)`.
 - Gallery create/update form mewajibkan salah satu kategori. Record lama kategori null ditampilkan pada UI internal sebagai "Belum dikategorikan"; operator dapat mengklasifikasikan ketika mengedit.
 - Tidak ada tabel categories, multi-select, pivot, atau kategori custom.
 
 ### 3.3 Media order
 
 - Tambah `media.sort_order` unsigned integer dengan default 0.
-- Media album existing mendapat default seragam 0; tie-breaker `id` naik menjaga deterministic order tanpa backfill.
-- Relation manager galeri mengelola upload file gambar dan `alt_text`, `sort_order`, `is_public`; file media album publik disimpan pada disk public mengikuti workflow media yang ada. Media private tetap pada local.
-- Media publik hanya boleh ditayangkan jika `is_public=true`, `disk=public`, album pemilik Gallery exists, status published dan `published_at` terisi. Event covers merupakan jalur terpisah dan tidak menggunakan Media/gallery FK.
+- Media album existing mendapat default seragam 0; tie-breaker `id` naik menjaga deterministic order tanpa backfill. Tambah index `(gallery_id, is_public, sort_order, id)` untuk urutan query album.
+- Semua upload event cover dan gallery media menerima hanya MIME image JPEG/PNG/WebP, menolak SVG, dan memiliki batas maksimum 5 MiB.
+- Gallery Relation Manager membuat upload baru pada disk `local`, `is_public=false`, dengan `alt_text` dan `sort_order` yang dikelola operator. Aksi `Terbitkan media` hanya tersedia setelah Gallery parent berstatus published dan `published_at` terisi; aksi mewajibkan alt text, menyalin JPEG/PNG/WebP ke path baru di disk `public`, memperbarui record ke disk/public dan `is_public=true`, lalu menghapus file local hanya setelah transaksi database berhasil. Jika copy atau update gagal, file public baru dibersihkan dan record/file local tetap utuh. Draft album tidak pernah memiliki file media baru pada public disk.
+- Aksi `Hapus dari portal` mengubah `is_public=false` dan menghapus media dari discovery/route aplikasi tetapi tidak menghapus file pada disk `public`, sebab direct `/storage` URL yang telah diketahui tidak dapat dicabut. UI tidak menawarkan toggle kembali ke private. Upload private baru tetap pada local.
 
 ### 3.4 Migrations dan rollback
 
@@ -80,9 +82,11 @@ Menerapkan tampilan dan interaksi preview yang telah disetujui ke portal MVP Bla
 
 ## 4. Admin Management
 
-- Event Filament form menambah upload cover, alt text, preview upload, MIME/size validation, dan scope storage privat.
+- Event Filament form menambah upload cover dan alt text, preview, MIME/size validation, dan prefix private `local`. Cover optional; publish action existing tidak meminta cover.
+- Event Resource mendapat halaman Edit dengan aksi submit-for-review dan publish-after-review memakai `PublishContent` existing; owner tidak dapat menyetujui konten sendiri.
 - Gallery Filament form menambah Select kategori enum; existing null ditampilkan sebagai belum dikategorikan.
-- Media dikelola melalui Relation Manager di Gallery Resource: upload satu/multiple image dalam scope unit/gallery, alt text, sort order, dan public/private toggle sesuai policy. Hak unit tetap mengikuti `OrganizationScope` dan Filament policies.
+- Gallery Resource mendapat halaman Edit dengan aksi submit-for-review dan publish-after-review memakai `PublishContent` existing; owner tidak dapat menyetujui konten sendiri.
+- Gallery Media Relation Manager mengunggah satu file per Media record ke disk `local`, mengelola alt text/sort_order, memindahkan file satu arah ke path unik `public` hanya pada aksi `Terbitkan media` dan hanya jika album sudah published, serta menyediakan `Hapus dari portal`. File yang sudah di-public-kan tidak dapat diganti/ditimpa atau dipindah kembali ke local; operator membuat record baru untuk mengganti foto. Tidak ada direct edit pada `disk`/`is_public`.
 - Tidak membuat generic media catalog atau abstraction upload baru.
 
 ## 5. Routes, Query, dan File Map Target
@@ -91,8 +95,8 @@ Menerapkan tampilan dan interaksi preview yang telah disetujui ke portal MVP Bla
 - `TrainingLocationController`: index dan show berbagi query predicate published+verified; show eager-load `organizationUnit`.
 - `EventController`: index filter period tervalidasi, pagination 12, cover detail; show eager-load cover metadata. Cover controller melayani private stored cover only after published check.
 - `GalleryController`: filter category tervalidasi, pagination 12, eager-load public media ordered `sort_order,id`, tidak membaca media private.
-- `PublicMediaController`: perketat akses media album: `is_public`, disk public, parent Gallery exists, status published dan `published_at` non-null; akses langsung tak boleh melewati filter daftar.
-- Filament Event form menambah upload cover dan alt text. Gallery form menambah Select kategori enum. Gallery Relation Manager menyediakan upload media dan mengelola alt text, sort_order, is_public sesuai policy.
+- `PublicMediaController`: perketat akses route untuk `is_public`, disk public, parent Gallery exists, status published dan `published_at` non-null. `/storage` direct access mengikuti sifat public disk dan tidak dipresentasikan sebagai revoked ketika album di-unpublish.
+- Filament Event form menambah upload cover dan alt text. Gallery form menambah Select kategori enum. Gallery Media Relation Manager menyediakan upload media dan aksi lifecycle yang memindahkan local ke public satu arah.
 - Blade public subpages diselaraskan dengan desain preview: layout, organization, galleries, events index/show, training-location index/show, pages show. Homepage hero tidak didesain ulang.
 - Frontend assets production memakai Vite `resources/css/app.css` dan `resources/js/app.js` (serta satu modul JS terfokus jika perlu lightbox/filter); tidak ada dependency baru. Leaflet yang terpasang tetap dipakai dengan marker dan attribution.
 - Tests: update PublicPortalTest, PrivateMediaAccessTest; tambah focused tests event cover route, filter pagination, gallery categories/order/lightbox data privacy, training-location detail valid/invalid, and Filament form/relation manager scope.
@@ -100,7 +104,9 @@ Menerapkan tampilan dan interaksi preview yang telah disetujui ke portal MVP Bla
 ## 6. Security and Privacy
 
 - Tidak ada data anggota di halaman publik.
-- Draft, pending_review, archived, unverified locations, non-public media, media dari disk local, event covers sebelum terbit, dan media dari album belum published tidak boleh diakses melalui HTML atau endpoint langsung.
+- Draft, pending_review, archived, unverified locations, non-public media, media dari disk local, dan event covers sebelum terbit tidak boleh diakses melalui halaman atau endpoint aplikasi.
+- Media untuk album yang masih draft/pending review tetap pada local dan tidak memiliki public URL. Album/media yang tidak lagi berstatus public/published hilang dari HTML dan route `public.media.show`; direct `/storage/...` URL dari media yang sebelumnya diterbitkan tetap dapat diakses karena file pada public disk.
+- Jangan mengunggah data privat ke disk public. Public disk dipakai hanya untuk media yang operator setujui untuk tayang; unpublish membatasi aplikasi, bukan revoke file URL yang sudah diketahui.
 - Query parameters category/period memakai allowlist enum; nilai tidak valid kembali ke default aman `all`/`upcoming` dan tidak masuk SQL raw.
 - Popup Leaflet memakai DOM nodes/textContent atau Blade escaping, bukan interpolasi string HTML yang belum di-escape.
 - Sampul event disajikan dari disk local melalui controller yang memverifikasi publication status, bukan direct filesystem path.
@@ -128,6 +134,8 @@ Menerapkan tampilan dan interaksi preview yang telah disetujui ke portal MVP Bla
 ## 9. Risks and Rollback
 
 - `cover_path` menyimpan private file path yang hanya controller authorized to expose after publication; test wajib membuktikan direct route denial for non-public states.
+- Public gallery media stays on `public` disk. Gallery unpublish removes media from application HTML/route but cannot revoke any previously disclosed direct `/storage` URL; private media stays on local. A future revocation requirement would need private storage and a managed migration of existing files, explicitly out of this design.
+- Gallery media publishing is one-way from local to public. `Hapus dari portal` changes application visibility only; it does not guarantee URL revocation or restore private confidentiality for an already public file.
 - Media `sort_order` default 0 mempertahankan legacy order via id tie-break, tetapi first edit/reorder can create duplicate positions; deterministic tie-break remains contract.
 - Gallery category nullable berarti legacy album tidak muncul pada category-specific views sampai operator classify; all view remains inclusive.
 - Upload cleanup must not remove last good cover before successful record update; test failure path.
