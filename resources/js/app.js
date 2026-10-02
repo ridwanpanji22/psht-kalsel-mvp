@@ -1,8 +1,21 @@
 import './firebase-auth';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import markerIcon2xUrl from 'leaflet/dist/images/marker-icon-2x.png';
+import markerIconUrl from 'leaflet/dist/images/marker-icon.png';
+import markerShadowUrl from 'leaflet/dist/images/marker-shadow.png';
 import { initGalleryCarousels } from './gallery-carousel';
 import { initGalleryLightbox } from './public-gallery-lightbox';
+
+// Leaflet resolves its default marker images relative to the stylesheet at
+// runtime, which breaks under Vite's hashed asset URLs (the icon 404s and the
+// marker renders as a broken image). Import the images so Vite fingerprints
+// them, then point the default icon at those resolved URLs.
+L.Icon.Default.mergeOptions({
+    iconRetinaUrl: markerIcon2xUrl,
+    iconUrl: markerIconUrl,
+    shadowUrl: markerShadowUrl,
+});
 
 const mapElement = document.querySelector('#training-map');
 const locationDataElement = document.querySelector('#training-location-data');
