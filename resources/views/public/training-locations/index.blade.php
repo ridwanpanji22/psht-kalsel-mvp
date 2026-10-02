@@ -12,7 +12,9 @@
             <ul class="mt-8 grid gap-4 sm:grid-cols-2">
                 @foreach ($locations as $location)
                     <li class="rounded-xl border border-stone-200 bg-white p-5">
-                        <h2 class="text-xl font-semibold">{{ $location->name }}</h2>
+                        <h2 class="text-xl font-semibold">
+                            <a href="{{ route('public.training-locations.show', $location->slug) }}" class="underline-offset-4 hover:underline">{{ $location->name }}</a>
+                        </h2>
                         <p class="mt-2 text-stone-600">{{ $location->address }}</p>
                         @if ($location->schedule)
                             <p class="mt-3 text-sm"><strong>Jadwal:</strong> {{ $location->schedule }}</p>
