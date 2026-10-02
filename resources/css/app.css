@@ -8,13 +8,220 @@
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
+
+    /* Public portal palette. Scoped to public classes/routes below so the
+       light `/admin` auth surfaces never inherit the dark theme. */
+    --color-psht-bg: #0d1117;
+    --color-psht-deep: #0b0f16;
+    --color-psht-surface: #111722;
+    --color-psht-blue: #0720b0;
+    --color-psht-bright: #2162ed;
+    --color-psht-gold: #fbbf24;
 }
 
-#training-map {
+/* The banner below the dark page heading uses the deeper background. */
+.psht-page-heading {
+    background: var(--color-psht-deep);
+}
+
+/* ------------------------------------------------------------------ */
+/* Public portal (dark editorial shell)                                */
+/* ------------------------------------------------------------------ */
+
+.psht-shell {
+    color-scheme: dark;
+    --psht-focus: #2162ed;
+}
+
+.psht-shell :where(a, button, input, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--psht-focus);
+    outline-offset: 3px;
+    border-radius: 0.5rem;
+}
+
+.psht-footer {
+    border-top: 1px solid rgb(255 255 255 / 0.1);
+    background: var(--color-psht-bg);
+}
+
+/* Page-heading band shared by the interior pages. */
+.psht-page-heading {
+    border-bottom: 1px solid rgb(255 255 255 / 0.1);
+    padding-block: 4rem 2.5rem;
+}
+
+.psht-kicker {
+    color: #fcd34d;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.psht-card {
+    border: 1px solid rgb(255 255 255 / 0.1);
+    border-radius: 1rem;
+    background: var(--color-psht-surface);
+}
+
+/* Filter controls (events period, gallery category, pager). */
+.psht-control {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 0.5rem;
+    background: rgb(255 255 255 / 0.04);
+    color: #e7e5e4;
+    padding-inline: 1rem;
+    padding-block: 0.5rem;
+    transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.psht-control:hover {
+    border-color: var(--color-psht-bright);
+    background: rgb(33 98 237 / 0.12);
+}
+
+.psht-control[aria-current="true"],
+.psht-control[aria-current="page"],
+.psht-control[data-active="true"] {
+    border-color: var(--color-psht-bright);
+    background: var(--color-psht-blue);
+    color: #fff;
+}
+
+.psht-control[aria-disabled="true"],
+.psht-control:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+/* Editorial reading measure for profile/history pages. */
+.psht-editorial {
+    max-width: 65ch;
+}
+
+.psht-editorial-body p + p {
+    margin-top: 1rem;
+}
+
+.editorial-drop-cap::first-letter {
+    float: left;
+    margin-right: 0.5rem;
+    color: #60a5fa;
+    font-size: 3.75rem;
+    font-weight: 700;
+    line-height: 0.85;
+}
+
+/* Organization hierarchy (parent vs supervising branch). */
+.organization-tree,
+.tree-children {
+    list-style: none;
+    padding-left: 0;
+}
+
+.tree-children {
+    margin-left: 0.75rem;
+    border-left: 1px solid rgb(255 255 255 / 0.15);
+    padding-left: 1rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Training location maps                                              */
+/* ------------------------------------------------------------------ */
+
+#training-map,
+#training-map-detail {
     min-height: 24rem;
-    background: linear-gradient(135deg, #ecfdf5, #f5f5f4);
+    background: linear-gradient(135deg, #0f172a, #0b0f16);
 }
 
-#training-map .leaflet-popup-content-wrapper {
+#training-map-detail {
+    min-height: 16rem;
+}
+
+#training-map .leaflet-popup-content-wrapper,
+#training-map-detail .leaflet-popup-content-wrapper {
     border-radius: 0.75rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Gallery lightbox (native <dialog>)                                  */
+/* ------------------------------------------------------------------ */
+
+.gallery-dialog {
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    overflow: auto;
+    width: min(72rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 2rem);
+    border: 1px solid rgb(255 255 255 / 0.14);
+    border-radius: 1rem;
+    background: var(--color-psht-surface);
+    color: #fff;
+    padding: 0;
+}
+
+.gallery-dialog::backdrop {
+    background: rgb(4 7 13 / 0.9);
+    backdrop-filter: blur(8px);
+}
+
+.gallery-dialog__frame {
+    position: relative;
+    margin: 0;
+    padding: 1rem;
+}
+
+.gallery-dialog__frame img {
+    max-height: calc(100dvh - 8rem);
+    width: 100%;
+    border-radius: 0.75rem;
+    object-fit: contain;
+}
+
+.gallery-dialog__frame p {
+    margin: 0.75rem 0 0;
+    color: #d6d3d1;
+}
+
+.gallery-dialog__close {
+    position: absolute;
+    right: 1.5rem;
+    top: 1.5rem;
+    z-index: 1;
+    min-height: 2.75rem;
+    border: 1px solid rgb(255 255 255 / 0.18);
+    border-radius: 0.5rem;
+    background: var(--color-psht-bg);
+    color: #fff;
+    padding-inline: 1rem;
+}
+
+.gallery-dialog__controls {
+    position: absolute;
+    left: 1.5rem;
+    top: 1.5rem;
+    z-index: 1;
+    display: flex;
+    gap: 0.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .psht-shell {
+        scroll-behavior: auto;
+    }
+
+    .psht-shell *,
+    .psht-shell *::before,
+    .psht-shell *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }

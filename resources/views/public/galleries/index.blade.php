@@ -1,30 +1,87 @@
 @extends('public.layouts.app')
 
-@section('title', 'Galeri — PSHT Kalimantan Selatan')
+@section('title', 'Galeri - PSHT Kalimantan Selatan')
+
+@php
+    $categories = [
+        'all' => 'Semua',
+        'latihan' => 'Latihan',
+        'kegiatan' => 'Kegiatan',
+        'pembinaan' => 'Pembinaan',
+    ];
+@endphp
 
 @section('content')
     <section aria-labelledby="gallery-heading">
-        <p class="text-sm font-semibold uppercase tracking-wide text-emerald-800">Dokumentasi organisasi</p>
-        <h1 id="gallery-heading" class="mt-2 text-3xl font-bold tracking-tight">Galeri</h1>
-        <div class="mt-8 space-y-8">
-            @forelse ($galleries as $gallery)
-                <article class="rounded-xl border border-stone-200 bg-white p-5">
-                    <h2 class="text-xl font-semibold">{{ $gallery->title }}</h2>
-                    @if ($gallery->description)
-                        <p class="mt-2 text-stone-600">{{ $gallery->description }}</p>
-                    @endif
-                    <ul class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Media {{ $gallery->title }}">
-                        @foreach ($gallery->media as $media)
-                            <li>
-                                <img class="aspect-video w-full rounded-lg object-cover" src="{{ route('public.media.show', $media) }}" alt="{{ $media->alt_text }}" loading="lazy">
-                            </li>
-                        @endforeach
-                    </ul>
-                </article>
-            @empty
-                <p class="rounded-xl border border-dashed border-stone-300 bg-white p-6 text-stone-600">Belum ada album yang diterbitkan.</p>
-            @endforelse
+        <header class="psht-page-heading">
+            <p class="psht-kicker">Dokumentasi organisasi</p>
+            <h1 id="gallery-heading" class="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">Galeri dokumentasi</h1>
+            <p class="mt-4 max-w-2xl text-lg leading-8 text-stone-300">Album publik dari kegiatan dan pembinaan PSHT Kalimantan Selatan.</p>
+        </header>
+
+        <div class="pt-8">
+            <div class="flex flex-wrap gap-2" role="group" aria-label="Filter kategori album">
+                @foreach ($categories as $value => $label)
+                    <a href="{{ route('public.galleries.index', ['category' => $value]) }}"
+                       class="psht-control"
+                       data-gallery-filter="{{ $value }}"
+                       @if ($category === $value) aria-current="true" @endif>{{ $label }}</a>
+                @endforeach
+            </div>
+
+            <div class="mt-8 space-y-8">
+                @forelse ($galleries as $gallery)
+                    <article class="psht-card p-5">
+                        <div class="flex flex-wrap items-baseline justify-between gap-2">
+                            <h2 class="text-xl font-semibold text-white">{{ $gallery->title }}</h2>
+                            @if ($gallery->category)
+                                <span class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">{{ $gallery->category->label() }}</span>
+                            @endif
+                        </div>
+                        @if ($gallery->description)
+                            <p class="mt-2 text-stone-400">{{ $gallery->description }}</p>
+                        @endif
+
+                        @if ($gallery->media->isEmpty())
+                            <p class="mt-4 rounded-xl border border-dashed border-white/15 p-4 text-sm text-stone-400">Belum ada media publik pada album ini.</p>
+                        @else
+                            <ul class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Media {{ $gallery->title }}">
+                                @foreach ($gallery->media as $media)
+                                    <li>
+                                        <button type="button"
+                                                class="group block w-full overflow-hidden rounded-xl text-left"
+                                                data-gallery-open
+                                                data-media-label="{{ $media->alt_text ?: $gallery->title }}">
+                                            <img class="aspect-video w-full rounded-xl border border-white/10 object-cover transition group-hover:border-psht-bright" src="{{ route('public.media.show', $media) }}" alt="{{ $media->alt_text ?: 'Media album '.$gallery->title }}" loading="lazy">
+                                        </button>
+                                    </li>
+                                @endforeach
+                            </ul>
+                        @endif
+                    </article>
+                @empty
+                    <div class="psht-card border-dashed p-6 text-stone-400">
+                        <p>Belum ada album yang diterbitkan pada kategori ini.</p>
+                        <a href="{{ route('public.galleries.index', ['category' => 'all']) }}" class="mt-3 inline-block font-medium text-amber-300 underline-offset-4 hover:underline">Lihat semua album</a>
+                    </div>
+                @endforelse
+            </div>
+
+            <div class="mt-8">{{ $galleries->links() }}</div>
         </div>
-        <div class="mt-8">{{ $galleries->links() }}</div>
+
+        <dialog id="gallery-dialog" class="gallery-dialog" aria-label="Tampilan foto galeri">
+            <form method="dialog" class="gallery-dialog__frame">
+                <div class="gallery-dialog__controls">
+                    <button type="button" class="psht-control" data-lightbox-prev aria-label="Foto sebelumnya">Sebelumnya</button>
+                    <button type="button" class="psht-control" data-lightbox-next aria-label="Foto berikutnya">Berikutnya</button>
+                </div>
+                <button type="submit" class="gallery-dialog__close" data-lightbox-close aria-label="Tutup foto">Tutup</button>
+                <img data-gallery-dialog-image alt="">
+                <p data-gallery-dialog-caption></p>
+                <noscript><p>Tampilan foto memerlukan JavaScript. Semua foto tetap tersedia pada daftar album di atas.</p></noscript>
+                <p data-gallery-dialog-status class="sr-only" aria-live="polite"></p>
+            </form>
+        </dialog>
     </section>
 @endsection

@@ -92,12 +92,17 @@
             <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 @forelse ($events as $event)
                     <li>
-                        <a href="{{ route('public.events.show', $event->slug) }}" class="block h-full rounded-2xl border border-white/10 bg-[#111722] p-5 hover:border-amber-300/60 focus:outline-2 focus:outline-offset-2 focus:outline-amber-300">
-                            <time datetime="{{ $event->starts_at->toIso8601String() }}" class="text-sm text-amber-300">{{ $event->starts_at->locale('id')->translatedFormat('d F Y H:i') }}</time>
-                            <span class="mt-3 block font-semibold text-white">{{ $event->title }}</span>
-                            @if ($event->venue)
-                                <span class="mt-2 block text-sm text-stone-400">{{ $event->venue }}</span>
+                        <a href="{{ route('public.events.show', $event->slug) }}" class="block h-full overflow-hidden rounded-2xl border border-white/10 bg-[#111722] hover:border-amber-300/60 focus:outline-2 focus:outline-offset-2 focus:outline-amber-300">
+                            @if ($event->cover_path)
+                                <img class="aspect-video w-full object-cover" src="{{ route('public.events.cover', $event) }}" alt="{{ $event->cover_alt_text ?: $event->title }}" loading="lazy">
                             @endif
+                            <div class="p-5">
+                                <time datetime="{{ $event->starts_at->toIso8601String() }}" class="text-sm text-amber-300">{{ $event->starts_at->locale('id')->translatedFormat('d F Y H:i') }}</time>
+                                <span class="mt-3 block font-semibold text-white">{{ $event->title }}</span>
+                                @if ($event->venue)
+                                    <span class="mt-2 block text-sm text-stone-400">{{ $event->venue }}</span>
+                                @endif
+                            </div>
                         </a>
                     </li>
                 @empty
@@ -172,7 +177,9 @@
                 <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     @foreach ($trainingLocations as $location)
                         <li class="rounded-2xl border border-white/10 bg-[#111722] p-5">
-                            <h3 class="text-lg font-semibold text-white">{{ $location->name }}</h3>
+                            <h3 class="text-lg font-semibold text-white">
+                                <a href="{{ route('public.training-locations.show', $location->slug) }}" class="underline-offset-4 hover:text-amber-200 hover:underline focus:outline-2 focus:outline-offset-2 focus:outline-amber-300">{{ $location->name }}</a>
+                            </h3>
                             <p class="mt-2 text-sm text-stone-400">{{ $location->address }}</p>
                         </li>
                     @endforeach

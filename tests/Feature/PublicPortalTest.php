@@ -260,7 +260,7 @@ class PublicPortalTest extends TestCase
             ->assertSee('Tempat latihan')
             ->assertSee('mx-auto max-w-6xl px-4 py-10', false)
             ->assertDontSee('hero-martial-arts.mp4')
-            ->assertDontSee('<details', false);
+            ->assertSee('<details', false);
     }
 
     public function test_homepage_renders_gallery_carousel_structure_and_controls(): void

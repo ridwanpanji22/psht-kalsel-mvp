@@ -22,7 +22,7 @@ class HomeController extends Controller
                 ->get(),
             'events' => Event::query()
                 ->published()
-                ->select(['id', 'slug', 'title', 'starts_at', 'venue'])
+                ->select(['id', 'slug', 'title', 'starts_at', 'venue', 'cover_path', 'cover_alt_text'])
                 ->where('starts_at', '>=', now())
                 ->orderBy('starts_at')
                 ->limit(4)
