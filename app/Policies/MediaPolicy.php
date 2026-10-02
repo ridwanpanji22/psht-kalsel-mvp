@@ -14,4 +14,24 @@ class MediaPolicy
             ? Response::allow()
             : Response::denyAsNotFound();
     }
+
+    public function create(User $user): bool
+    {
+        return $user->is_active && $user->visibleUnitIds() !== [];
+    }
+
+    public function update(User $user, Media $media): bool
+    {
+        return $this->view($user, $media)->allowed();
+    }
+
+    public function delete(User $user, Media $media): bool
+    {
+        return false;
+    }
+
+    public function deleteAny(User $user): bool
+    {
+        return false;
+    }
 }

@@ -3,7 +3,9 @@
 namespace App\Filament\Resources\Galleries;
 
 use App\Filament\Resources\Galleries\Pages\CreateGallery;
+use App\Filament\Resources\Galleries\Pages\EditGallery;
 use App\Filament\Resources\Galleries\Pages\ListGalleries;
+use App\Filament\Resources\Galleries\RelationManagers\GalleryMediaRelationManager;
 use App\Filament\Resources\Galleries\Schemas\GalleryForm;
 use App\Filament\Resources\Galleries\Tables\GalleriesTable;
 use App\Models\Gallery;
@@ -40,7 +42,7 @@ class GalleryResource extends Resource
     public static function getRelations(): array
     {
         return [
-            //
+            GalleryMediaRelationManager::class,
         ];
     }
 
@@ -49,6 +51,7 @@ class GalleryResource extends Resource
         return [
             'index' => ListGalleries::route('/'),
             'create' => CreateGallery::route('/create'),
+            'edit' => EditGallery::route('/{record}/edit'),
         ];
     }
 }
