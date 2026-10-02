@@ -356,6 +356,27 @@ class FilamentPublicationWorkflowTest extends TestCase
         $this->assertSame(GalleryCategory::Kegiatan, $legacy->refresh()->category);
     }
 
+    public function test_legacy_gallery_must_be_classified_before_other_edits_can_be_saved(): void
+    {
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $legacy = Gallery::factory()->create([
+            'organization_unit_id' => $unit->id,
+            'category' => null,
+        ]);
+
+        $this->actingAs($operator);
+
+        Livewire::test(EditGallery::class, ['record' => $legacy->getRouteKey()])
+            ->assertFormSet(['category' => null])
+            ->fillForm(['title' => 'Perubahan tanpa klasifikasi'])
+            ->call('save')
+            ->assertHasFormErrors(['category']);
+
+        $this->assertNotSame('Perubahan tanpa klasifikasi', $legacy->refresh()->title);
+        $this->assertNull($legacy->category);
+    }
+
     public function test_gallery_edit_rejects_category_outside_the_fixed_enum(): void
     {
         $unit = OrganizationUnit::factory()->create();
@@ -1414,5 +1435,95 @@ class FilamentPublicationWorkflowTest extends TestCase
             'status' => PublicationStatus::Published,
             'published_at' => now(),
         ]);
+    }
+
+    public function test_event_cover_cannot_reuse_another_events_private_cover_path(): void
+    {
+        Storage::fake('local');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $foreignPath = $this->jpeg('foreign.jpg')->store('private/event-covers', 'local');
+        $foreign = Event::factory()->create([
+            'organization_unit_id' => $unit->id,
+            'cover_path' => $foreignPath,
+        ]);
+        $target = Event::factory()->create(['organization_unit_id' => $unit->id]);
+
+        $this->actingAs($operator);
+
+        Livewire::test(EditEvent::class, ['record' => $target->getRouteKey()])
+            ->fillForm(['cover_path' => [$foreignPath], 'cover_alt_text' => 'Cover reuse'])
+            ->call('save')
+            ->assertHasFormErrors(['cover_path']);
+
+        $this->assertNull($target->refresh()->cover_path);
+        $this->assertSame($foreignPath, $foreign->refresh()->cover_path);
+        Storage::disk('local')->assertExists($foreignPath);
+    }
+
+    public function test_gallery_media_cannot_reuse_another_gallery_private_upload(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $source = Gallery::factory()->create(['organization_unit_id' => $unit->id]);
+        $target = Gallery::factory()->create(['organization_unit_id' => $unit->id]);
+        $foreignPath = $this->jpeg('foreign-media.jpg')->store('private/gallery-media', 'local');
+        $foreignMedia = Media::factory()->create([
+            'gallery_id' => $source->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'local',
+            'path' => $foreignPath,
+            'mime_type' => 'image/jpeg',
+            'size' => Storage::disk('local')->size($foreignPath),
+            'is_public' => false,
+        ]);
+
+        $this->actingAs($operator);
+
+        Livewire::test(GalleryMediaRelationManager::class, [
+            'ownerRecord' => $target,
+            'pageClass' => EditGallery::class,
+        ])
+            ->callTableAction('create', data: [
+                'file' => [$foreignPath],
+                'alt_text' => 'Bukan upload baru',
+                'sort_order' => 0,
+            ])
+            ->assertHasTableActionErrors(['file']);
+
+        $this->assertSame(1, Media::query()->count());
+        $this->assertSame($source->id, $foreignMedia->refresh()->gallery_id);
+        Storage::disk('local')->assertExists($foreignPath);
+    }
+
+    public function test_gallery_owner_unit_cannot_change_after_media_exists(): void
+    {
+        $source = OrganizationUnit::factory()->create();
+        $destination = OrganizationUnit::factory()->create();
+        $operator = $this->operator($source);
+        UnitAssignment::factory()->create([
+            'user_id' => $operator->id,
+            'organization_unit_id' => $destination->id,
+        ]);
+        $gallery = Gallery::factory()->create([
+            'organization_unit_id' => $source->id,
+            'category' => GalleryCategory::Latihan,
+        ]);
+        Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $source->id,
+        ]);
+
+        $this->actingAs($operator);
+
+        Livewire::test(EditGallery::class, ['record' => $gallery->getRouteKey()])
+            ->fillForm(['organization_unit_id' => $destination->id])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame($source->id, $gallery->refresh()->organization_unit_id);
+        $this->assertSame($source->id, $gallery->media()->firstOrFail()->organization_unit_id);
     }
 }

@@ -15,9 +15,6 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -99,22 +96,6 @@ class PublicUiPublicationSchemaTest extends TestCase
         $this->assertIsInt($defaulted->fresh()->sort_order);
     }
 
-    public function test_write_boundary_rejects_category_outside_the_fixed_enum(): void
-    {
-        $this->expectException(ValidationException::class);
-
-        $this->validateCategory('liburan');
-    }
-
-    public function test_write_boundary_accepts_each_allowed_category_and_null(): void
-    {
-        foreach (['latihan', 'kegiatan', 'pembinaan', null] as $value) {
-            $validated = $this->validateCategory($value);
-
-            $this->assertSame($value, $validated);
-        }
-    }
-
     public function test_enum_exposes_the_three_fixed_values_with_indonesian_labels(): void
     {
         $this->assertSame(['latihan', 'kegiatan', 'pembinaan'], array_keys(GalleryCategory::options()));
@@ -140,7 +121,7 @@ class PublicUiPublicationSchemaTest extends TestCase
         $this->assertDatabaseMissing('galleries', ['slug' => 'album-tidak-sah']);
     }
 
-    public function test_gallery_filament_create_persists_each_allowed_category(): void
+    public function test_gallery_filament_create_requires_one_allowed_category(): void
     {
         $this->actingAsOperator();
 
@@ -165,14 +146,14 @@ class PublicUiPublicationSchemaTest extends TestCase
         Livewire::test(CreateGallery::class)
             ->fillForm([
                 'organization_unit_id' => $unitId,
-                'title' => 'Album Warisan',
-                'slug' => 'album-warisan',
+                'title' => 'Album Tanpa Kategori',
+                'slug' => 'album-tanpa-kategori',
                 'category' => null,
             ])
             ->call('create')
-            ->assertHasNoFormErrors();
+            ->assertHasFormErrors(['category']);
 
-        $this->assertNull(Gallery::query()->where('slug', 'album-warisan')->firstOrFail()->category);
+        $this->assertDatabaseMissing('galleries', ['slug' => 'album-tanpa-kategori']);
     }
 
     public function test_gallery_media_relation_is_ordered_by_sort_order_then_id(): void
@@ -236,16 +217,6 @@ class PublicUiPublicationSchemaTest extends TestCase
         $migration = require database_path('migrations/'.self::MIGRATION);
 
         return $migration;
-    }
-
-    private function validateCategory(?string $value): ?string
-    {
-        $validated = Validator::make(
-            ['category' => $value],
-            ['category' => ['nullable', 'string', Rule::enum(GalleryCategory::class)]],
-        )->validate();
-
-        return $validated['category'] ?? null;
     }
 
     private function actingAsOperator(): void

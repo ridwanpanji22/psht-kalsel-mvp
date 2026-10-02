@@ -24,6 +24,6 @@ class CategorySchema
             ->label('Kategori')
             ->options(GalleryCategory::class)
             ->placeholder('Belum dikategorikan')
-            ->nullable();
+            ->required();
     }
 }

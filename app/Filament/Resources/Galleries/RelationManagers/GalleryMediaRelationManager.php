@@ -68,7 +68,7 @@ class GalleryMediaRelationManager extends RelationManager
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                 ->maxSize(5120)
                 ->preserveFilenames(false)
-                ->preventFilePathTampering(true, fn (string $file): bool => SafeStoragePath::isSafe($file, [SafeStoragePath::GALLERY_MEDIA_PREFIX]))
+                ->preventFilePathTampering()
                 ->rules([
                     fn (): \Closure => function (string $attribute, mixed $value, \Closure $fail): void {
                         $paths = is_array($value) ? $value : [$value];

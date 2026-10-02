@@ -19,7 +19,7 @@ class GalleryForm
                 ->options(fn (): array => OrganizationUnit::query()
                     ->whereIn('id', app(OrganizationScope::class)->visibleUnitIds(auth()->user()))
                     ->orderBy('name')->pluck('name', 'id')->all())
-                ->searchable()->required(),
+                ->searchable()->required()->disabledOn('edit'),
             TextInput::make('title')->label('Nama album')->required()->maxLength(255),
             TextInput::make('slug')->label('Slug')->required()->maxLength(255)->unique(ignoreRecord: true),
             Textarea::make('description')->label('Keterangan')->rows(4)->columnSpanFull(),

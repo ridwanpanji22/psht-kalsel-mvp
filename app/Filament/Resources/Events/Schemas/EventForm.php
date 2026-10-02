@@ -40,7 +40,7 @@ class EventForm
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                 ->maxSize(5120)
                 ->preserveFilenames(false)
-                ->preventFilePathTampering(true, fn (string $file): bool => SafeStoragePath::isSafe($file, [SafeStoragePath::EVENT_COVER_PREFIX]))
+                ->preventFilePathTampering()
                 ->rules([
                     fn (): \Closure => function (string $attribute, mixed $value, \Closure $fail): void {
                         $paths = is_array($value) ? $value : [$value];
