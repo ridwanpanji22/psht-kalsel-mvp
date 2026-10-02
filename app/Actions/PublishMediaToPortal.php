@@ -5,6 +5,7 @@ namespace App\Actions;
 use App\Enums\PublicationStatus;
 use App\Models\Media;
 use App\Models\User;
+use App\Support\SafeStoragePath;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -22,17 +23,18 @@ use Throwable;
  * the private local file removed. If the database write fails, the freshly
  * copied public file is deleted so no orphaned public asset survives.
  *
- * Only records that are currently backed by the private `local` disk, live
- * under the gallery-media prefix, and whose file content is a JPEG/PNG/WebP
- * image may be published. This prevents a client-tampered path, a record
- * already on the public disk, or a hidden (already-disclosed) public file
- * from being republished or relocated.
+ * Only records that are currently backed by the private `local` disk and
+ * whose path is a traversal-safe `private/gallery-media/` relative path whose
+ * content is a JPEG/PNG/WebP image may be published. This prevents a
+ * client-tampered path (including `../` traversal), a record already on the
+ * public disk, or a hidden (already-disclosed) public file from being
+ * republished or relocated.
  */
 class PublishMediaToPortal
 {
     private const LOCAL_DISK = 'local';
 
-    private const LOCAL_PREFIX = 'private/gallery-media/';
+    private const PUBLIC_DISK = 'public';
 
     private const PUBLIC_PREFIX = 'public/gallery-media/';
 
@@ -49,9 +51,20 @@ class PublishMediaToPortal
             ]);
         }
 
-        if ($media->disk !== self::LOCAL_DISK || ! str_starts_with((string) $media->path, self::LOCAL_PREFIX)) {
+        if ($media->disk !== self::LOCAL_DISK) {
             throw ValidationException::withMessages([
                 'media' => 'Hanya media pada penyimpanan privat album yang dapat diterbitkan.',
+            ]);
+        }
+
+        $sourcePath = SafeStoragePath::normalize(
+            (string) $media->path,
+            [SafeStoragePath::GALLERY_MEDIA_PREFIX],
+        );
+
+        if ($sourcePath === null) {
+            throw ValidationException::withMessages([
+                'media' => 'Lokasi berkas media tidak valid.',
             ]);
         }
 
@@ -78,7 +91,6 @@ class PublishMediaToPortal
         }
 
         $sourceDisk = Storage::disk(self::LOCAL_DISK);
-        $sourcePath = (string) $media->path;
 
         if (! $sourceDisk->exists($sourcePath)) {
             throw ValidationException::withMessages([
@@ -86,14 +98,27 @@ class PublishMediaToPortal
             ]);
         }
 
-        if (! in_array($sourceDisk->mimeType($sourcePath), self::ALLOWED_MIME_TYPES, true)) {
+        try {
+            $mimeType = $sourceDisk->mimeType($sourcePath);
+        } catch (Throwable $exception) {
+            Log::error('Gagal membaca metadata berkas media privat.', [
+                'path' => $sourcePath,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            throw ValidationException::withMessages([
+                'media' => 'Berkas media tidak dapat dibaca.',
+            ]);
+        }
+
+        if (! in_array($mimeType, self::ALLOWED_MIME_TYPES, true)) {
             throw ValidationException::withMessages([
                 'media' => 'Berkas media harus berupa gambar JPEG, PNG, atau WebP.',
             ]);
         }
 
         $publicPath = $this->uniquePublicPath($sourcePath);
-        $publicDisk = Storage::disk('public');
+        $publicDisk = Storage::disk(self::PUBLIC_DISK);
 
         try {
             $copied = $publicDisk->put($publicPath, $sourceDisk->get($sourcePath));
@@ -112,7 +137,7 @@ class PublishMediaToPortal
         try {
             DB::transaction(function () use ($media, $publicPath, $altText): void {
                 $media->update([
-                    'disk' => 'public',
+                    'disk' => self::PUBLIC_DISK,
                     'path' => $publicPath,
                     'alt_text' => $altText,
                     'is_public' => true,
@@ -121,12 +146,14 @@ class PublishMediaToPortal
         } catch (Throwable $exception) {
             // The DB write failed; remove the freshly copied public file so the
             // state flips atomically. The public file is new, so deleting it is
-            // always safe and never removes a previously disclosed asset.
-            if (! $publicDisk->delete($publicPath) || $publicDisk->exists($publicPath)) {
-                Log::error('Gagal membersihkan berkas publik setelah kegagalan basis data.', [
-                    'path' => $publicPath,
-                ]);
-            }
+            // always safe and never removes a previously disclosed asset. A
+            // cleanup failure is reported but must not mask the DB exception.
+            $this->reportCleanupFailure(
+                fn () => $publicDisk->delete($publicPath) && ! $publicDisk->exists($publicPath),
+                $publicPath,
+                'Gagal membersihkan berkas publik setelah kegagalan basis data.',
+                $exception,
+            );
 
             throw $exception;
         }
@@ -135,44 +162,52 @@ class PublishMediaToPortal
         // referenced. Deleting it is a best-effort cleanup after commit — a
         // failure here must be reported loudly but never rolls back the public
         // state or removes the public file.
-        try {
-            $sourceDisk->delete($sourcePath);
-
-            if ($sourceDisk->exists($sourcePath)) {
-                Log::error('Berkas privat media masih ada setelah penerbitan.', [
-                    'path' => $sourcePath,
-                ]);
-            }
-        } catch (Throwable $exception) {
-            Log::error('Gagal menghapus berkas privat media setelah penerbitan.', [
-                'path' => $sourcePath,
-                'exception' => $exception->getMessage(),
-            ]);
-        }
+        $this->reportCleanupFailure(
+            fn () => $sourceDisk->delete($sourcePath) && ! $sourceDisk->exists($sourcePath),
+            $sourcePath,
+            'Gagal menghapus berkas privat media setelah penerbitan.',
+            null,
+        );
 
         return $media->refresh();
     }
 
     private function compensate(FilesystemAdapter $publicDisk, string $publicPath, Throwable $original): void
     {
+        $this->reportCleanupFailure(
+            fn () => $publicDisk->delete($publicPath) && ! $publicDisk->exists($publicPath),
+            $publicPath,
+            'Gagal membersihkan berkas publik setelah kegagalan salin.',
+            $original,
+        );
+    }
+
+    /**
+     * Run a cleanup operation, reporting (never masking) any failure. The
+     * `$operation` closure returns true when the target path is confirmed
+     * gone. Thrown cleanup exceptions are logged with context and swallowed;
+     * the caller's original exception is always the one that propagates.
+     */
+    private function reportCleanupFailure(\Closure $operation, string $path, string $message, ?Throwable $original): void
+    {
         try {
-            $deleted = $publicDisk->delete($publicPath);
+            if ($operation()) {
+                return;
+            }
         } catch (Throwable $cleanupException) {
-            Log::error('Gagal membersihkan berkas publik setelah kegagalan salin.', [
-                'path' => $publicPath,
-                'original' => $original->getMessage(),
+            Log::error($message, [
+                'path' => $path,
+                'original' => $original?->getMessage(),
                 'cleanup' => $cleanupException->getMessage(),
             ]);
 
             return;
         }
 
-        if (! $deleted || $publicDisk->exists($publicPath)) {
-            Log::error('Berkas publik masih ada setelah kegagalan salin.', [
-                'path' => $publicPath,
-                'original' => $original->getMessage(),
-            ]);
-        }
+        Log::error($message, [
+            'path' => $path,
+            'original' => $original?->getMessage(),
+        ]);
     }
 
     private function uniquePublicPath(string $sourcePath): string

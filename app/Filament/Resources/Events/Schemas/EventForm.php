@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Events\Schemas;
 
 use App\Models\OrganizationUnit;
 use App\Support\OrganizationScope;
+use App\Support\SafeStoragePath;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
@@ -39,7 +40,7 @@ class EventForm
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                 ->maxSize(5120)
                 ->preserveFilenames(false)
-                ->preventFilePathTampering(true, fn (string $file): bool => str_starts_with($file, 'private/event-covers/'))
+                ->preventFilePathTampering(true, fn (string $file): bool => SafeStoragePath::isSafe($file, [SafeStoragePath::EVENT_COVER_PREFIX]))
                 ->rules([
                     fn (): \Closure => function (string $attribute, mixed $value, \Closure $fail): void {
                         $paths = is_array($value) ? $value : [$value];
@@ -49,7 +50,7 @@ class EventForm
                                 continue;
                             }
 
-                            if (! is_string($path) || ! str_starts_with($path, 'private/event-covers/')) {
+                            if (! is_string($path) || ! SafeStoragePath::isSafe($path, [SafeStoragePath::EVENT_COVER_PREFIX])) {
                                 $fail('Sampul harus diunggah melalui formulir ini.');
                             }
                         }

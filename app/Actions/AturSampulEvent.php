@@ -3,7 +3,11 @@
 namespace App\Actions;
 
 use App\Models\Event;
+use App\Support\SafeStoragePath;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
+use Throwable;
 
 /**
  * Persists an optional event cover to the private `local` disk and keeps the
@@ -15,31 +19,65 @@ use Illuminate\Support\Facades\Storage;
  *   previous cover file is left untouched.
  * - The replaced/removed old local file is only deleted after the record
  *   update has succeeded.
+ *
+ * Any path accepted here must be a traversal-safe `private/event-covers/`
+ * relative path; unsafe paths are rejected before they can be persisted or
+ * deleted, so a crafted value cannot reach another private file.
  */
 class AturSampulEvent
 {
-    public function apply(Event $event, int|string|null $newCoverPath, ?string $altText): Event
+    public function apply(Event $event, int|string|null $rawNewCoverPath, ?string $altText): Event
     {
         $oldCoverPath = $event->cover_path;
-        $newCoverPath = filled($newCoverPath) ? (string) $newCoverPath : null;
+
+        if (filled($rawNewCoverPath)) {
+            $newCoverPath = SafeStoragePath::normalize(
+                (string) $rawNewCoverPath,
+                [SafeStoragePath::EVENT_COVER_PREFIX],
+            );
+
+            if ($newCoverPath === null) {
+                throw ValidationException::withMessages([
+                    'cover_path' => 'Lokasi berkas sampul tidak valid.',
+                ]);
+            }
+        } else {
+            $newCoverPath = null;
+        }
 
         try {
             $event->update([
                 'cover_path' => $newCoverPath,
                 'cover_alt_text' => $newCoverPath === null ? null : $altText,
             ]);
-        } catch (\Throwable $exception) {
+        } catch (Throwable $exception) {
             if ($newCoverPath !== null && $newCoverPath !== $oldCoverPath) {
-                Storage::disk('local')->delete($newCoverPath);
+                $this->deleteQuietly($newCoverPath);
             }
 
             throw $exception;
         }
 
         if ($oldCoverPath !== null && $oldCoverPath !== $newCoverPath) {
-            Storage::disk('local')->delete($oldCoverPath);
+            $this->deleteQuietly($oldCoverPath);
         }
 
         return $event->refresh();
+    }
+
+    private function deleteQuietly(string $path): void
+    {
+        try {
+            $disk = Storage::disk('local');
+
+            if (! $disk->delete($path) || $disk->exists($path)) {
+                Log::error('Berkas sampul privat masih ada setelah operasi.', ['path' => $path]);
+            }
+        } catch (Throwable $exception) {
+            Log::error('Gagal menghapus berkas sampul privat.', [
+                'path' => $path,
+                'exception' => $exception->getMessage(),
+            ]);
+        }
     }
 }

@@ -7,6 +7,7 @@ use App\Actions\PublishMediaToPortal;
 use App\Enums\PublicationStatus;
 use App\Models\Gallery;
 use App\Models\Media;
+use App\Support\SafeStoragePath;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Actions\EditAction;
@@ -19,6 +20,8 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Filesystem\FilesystemAdapter;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -65,7 +68,7 @@ class GalleryMediaRelationManager extends RelationManager
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                 ->maxSize(5120)
                 ->preserveFilenames(false)
-                ->preventFilePathTampering(true, fn (string $file): bool => str_starts_with($file, 'private/gallery-media/'))
+                ->preventFilePathTampering(true, fn (string $file): bool => SafeStoragePath::isSafe($file, [SafeStoragePath::GALLERY_MEDIA_PREFIX]))
                 ->rules([
                     fn (): \Closure => function (string $attribute, mixed $value, \Closure $fail): void {
                         $paths = is_array($value) ? $value : [$value];
@@ -75,7 +78,7 @@ class GalleryMediaRelationManager extends RelationManager
                                 continue;
                             }
 
-                            if (! is_string($path) || ! str_starts_with($path, 'private/gallery-media/')) {
+                            if (! is_string($path) || ! SafeStoragePath::isSafe($path, [SafeStoragePath::GALLERY_MEDIA_PREFIX])) {
                                 $fail('Berkas media harus diunggah melalui formulir ini.');
                             }
                         }
@@ -121,26 +124,27 @@ class GalleryMediaRelationManager extends RelationManager
                         $gallery = $this->getOwnerRecord();
 
                         $disk = Storage::disk('local');
-                        $path = is_array($data['file']) ? reset($data['file']) : $data['file'];
+                        $rawPath = is_array($data['file']) ? reset($data['file']) : $data['file'];
+                        $path = is_string($rawPath)
+                            ? SafeStoragePath::normalize($rawPath, [SafeStoragePath::GALLERY_MEDIA_PREFIX])
+                            : null;
 
-                        if (! is_string($path) || ! str_starts_with($path, 'private/gallery-media/')) {
+                        if ($path === null) {
                             throw ValidationException::withMessages([
                                 'file' => 'Berkas media harus diunggah melalui formulir ini.',
                             ]);
                         }
 
-                        $mimeType = $disk->mimeType($path);
-                        $size = $disk->size($path);
-
-                        if (! is_string($mimeType) || ! in_array($mimeType, ['image/jpeg', 'image/png', 'image/webp'], true) || ! is_int($size)) {
-                            $disk->delete($path);
-
-                            throw ValidationException::withMessages([
-                                'file' => 'Berkas media tidak dapat dibaca atau bukan gambar yang diizinkan.',
-                            ]);
-                        }
-
                         try {
+                            $mimeType = $disk->mimeType($path);
+                            $size = $disk->size($path);
+
+                            if (! is_string($mimeType) || ! in_array($mimeType, ['image/jpeg', 'image/png', 'image/webp'], true) || ! is_int($size)) {
+                                throw ValidationException::withMessages([
+                                    'file' => 'Berkas media tidak dapat dibaca atau bukan gambar yang diizinkan.',
+                                ]);
+                            }
+
                             return $gallery->media()->create([
                                 'organization_unit_id' => $gallery->organization_unit_id,
                                 'disk' => 'local',
@@ -152,7 +156,7 @@ class GalleryMediaRelationManager extends RelationManager
                                 'sort_order' => $data['sort_order'] ?? 0,
                             ]);
                         } catch (Throwable $exception) {
-                            $disk->delete($path);
+                            $this->deleteStagedFileQuietly($disk, $path, $exception);
 
                             throw $exception;
                         }
@@ -190,5 +194,29 @@ class GalleryMediaRelationManager extends RelationManager
                     })
                     ->successNotificationTitle('Media disembunyikan dari portal'),
             ]);
+    }
+
+    /**
+     * Remove a staged local file after a failed create, reporting (never
+     * masking) a cleanup failure.
+     */
+    private function deleteStagedFileQuietly(FilesystemAdapter $disk, string $path, Throwable $original): void
+    {
+        try {
+            if ($disk->delete($path) && ! $disk->exists($path)) {
+                return;
+            }
+
+            Log::error('Berkas media privat staged masih ada setelah kegagalan.', [
+                'path' => $path,
+                'original' => $original->getMessage(),
+            ]);
+        } catch (Throwable $cleanupException) {
+            Log::error('Gagal menghapus berkas media privat staged.', [
+                'path' => $path,
+                'original' => $original->getMessage(),
+                'cleanup' => $cleanupException->getMessage(),
+            ]);
+        }
     }
 }

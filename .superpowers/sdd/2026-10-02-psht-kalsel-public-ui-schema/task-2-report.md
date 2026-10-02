@@ -183,9 +183,12 @@ All mutations reverted; the focused suite returned to green (23/23).
    replace-and-delete lifecycle is proven directly through `AturSampulEvent` with storage
    assertions. This is a framework test ergonomics issue, not app behavior; no
    production code works around it.
-2. **`write` vs `update` for cover/size.** Media `mime_type`/`size` are derived from the
-   stored file with `rescue(..., report: false)` so a metadata probe failure degrades to
-   `null` rather than blocking the upload. The columns are nullable per Task 1.
+2. **`mime_type`/`size` derivation (superseded by fix round 1/§7.1).** Originally the media
+   create callback derived `mime_type`/`size` from the stored file via `rescue(...,
+   report: false)`, which could yield `null` for NOT NULL columns. This is no longer the
+   case: the probe now runs inside the create cleanup guard and its result is validated
+   against the allowed MIME list, with the staged file deleted on any metadata or DB
+   failure (see §7.1 finding 3 and §8.1 finding 2).
 3. **`disk` observation in the table.** The relation table displays a `disk` badge and
    `is_public` icon (read-only observability). Brief intent ("no direct `disk`/`is_public`
    *editing*") is preserved — neither appears in the create/edit form.
@@ -286,3 +289,90 @@ Pint: `{"tool":"pint","result":"fixed"}` (formatting only) then re-ran green.
   Livewire `FileUpload` harness cannot replace an existing keyed stored value (see §6.1).
 - `mime_type`/`size` remain NOT NULL; metadata is now validated before insert and the
   staged file is removed if the probe or insert fails.
+
+---
+
+## 8. Fix round 2 — reviewer findings resolved
+
+**Commit:** `11f970a` — `fix(public): reject traversal paths and guard media/cover cleanup`
+(base: `8d9274a`). All five round-2 findings resolved with TDD (RED → GREEN) and
+mutation-proven.
+
+### 8.1 Findings and fixes
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| 1 | Critical | `str_starts_with` accepts `private/gallery-media/../event-covers/x.jpg`; Flysystem normalizes `..`, exposing/deleting another private file. Same for the event-cover prefix. | Added `App\Support\SafeStoragePath` — one canonical validator that rejects null bytes, backslashes, absolute paths, drive letters, and empty/dot/dotdot segments, and requires an exact traversal-free prefix. Applied before every `exists`/`mimeType`/`size`/`get`/`delete` and before persisting, for **both** event cover (`AturSampulEvent`, `EventForm` rule + `preventFilePathTampering`) and gallery media (relation-manager form, create callback, `PublishMediaToPortal`). |
+| 2 | Important | Metadata probe (`mimeType`/`size`) sat outside the create cleanup guard; a thrown probe leaked the staged file. | Probe + validation + row create now run inside one `try/catch`; any metadata/MIME/size/DB failure deletes the staged path. Deletion results are checked; thrown cleanup exceptions are logged without masking the original exception. |
+| 3 | Important | DB-failure compensation `delete()`/`exists()` unguarded: a throwing adapter masked the original DB exception and logged nothing. | `reportCleanupFailure()` wraps both DB-failure and copy-failure compensation: catches thrown deletes, verifies absence, logs `Log::error` with path/original/cleanup context, and always rethrows the original DB/copy exception. |
+| 4 | Important | Publish-flow tests used literal `'image-bytes'`, so under the content-MIME guard they no longer reached the DB/copy/cleanup paths. | Replaced all six occurrences with `$this->validJpegBytes()` so the named behavior is actually exercised. |
+| 5 | Minor | Report §6 stale pre-fix `rescue(..., report:false)` concern. | §6.2 updated to mark it superseded; this §8 records round-2 evidence and commit. |
+
+### 8.2 RED (before fixes)
+
+Command: `vendor/bin/phpunit tests/Feature/FilamentPublicationWorkflowTest.php`
+
+```
+tests 41 failures 5 errors 1
+```
+
+New tests RED: traversal publish (`Unable to find a file or directory at path
+[private/event-covers/sentinel.jpg]`), event-cover traversal (`Component has no
+errors.`), media-upload traversal (`Component has no errors.`), unsafe path shapes
+(`UnableToRetrieveMetadata ... private/gallery-media/x.jpg`), probe-failure cleanup
+(`Failed asserting that two arrays are identical.`), thrown-compensation
+(`Failed asserting that two strings are identical.`).
+
+### 8.3 GREEN (after fixes)
+
+```
+{"tool":"phpunit","result":"passed","tests":41,"passed":41,"assertions":282}
+```
+
+Focused suite: **41 tests, 41 passed, 282 assertions, 0 failures, 0 errors.**
+
+Adjacent suites (Task-1 schema, private media, publication workflow, Filament auth,
+unit isolation, unit-scope authorization, membership scope):
+
+```
+{"tool":"phpunit","result":"passed","tests":72,"passed":72,"assertions":386}
+```
+
+Pint: `{"tool":"pint","result":"passed"}`.
+
+### 8.4 Traversal / cleanup-failure behavior
+
+- **Traversal (publish):** `PublishMediaToPortal` normalizes the media path against
+  `private/gallery-media/`; `../event-covers/sentinel.jpg` is rejected before any storage
+  access, so the sentinel is neither published nor deleted (asserted).
+- **Traversal (upload):** both FileUpload fields reject traversal paths at the form rule
+  and `preventFilePathTampering`, and the create/persist callbacks reject them again.
+- **Unsafe shapes:** absolute paths, backslashes, repeated/leading/trailing separators,
+  dot segments, and null bytes are all rejected (`test_media_upload_rejects_unsafe_path_shapes`).
+- **Probe failure:** a thrown `mimeType()` deletes the staged local file and surfaces the
+  exception; no `Media` row is created.
+- **Thrown compensation (DB failure):** original `database down` exception is rethrown;
+  `Log::error('Gagal membersihkan berkas publik setelah kegagalan basis data.')` emitted;
+  record stays `disk=local, is_public=false`; local file retained.
+- **Thrown compensation (copy failure):** original `copy failed` exception is rethrown;
+  `Log::error('Gagal membersihkan berkas publik setelah kegagalan salin.')` emitted; local
+  file retained.
+
+### 8.5 Anti-vacuous evidence (round 2)
+
+| Mutation | Target test | Observed |
+|---|---|---|
+| Service `SafeStoragePath::normalize` → naive `str_starts_with` | `test_publish_media_refuses_a_traversal_path_and_leaves_the_sentinel_file_untouched` | 1 failure |
+| Event `SafeStoragePath::isSafe` → naive `str_starts_with` in rule + tamper guard | `test_event_cover_refuses_a_traversal_path_pointing_at_another_private_file` | 1 failure |
+| Probe moved back outside the create cleanup guard | `test_media_upload_deletes_the_staged_file_when_the_metadata_probe_throws` | 1 failure |
+| DB-failure compensation made unguarded (`$publicDisk->delete()` uncaught) | `test_publish_media_surfaces_a_thrown_compensation_delete_without_masking_the_db_exception` | 1 failure |
+
+All mutations reverted; focused suite returned green (41/41).
+
+### 8.6 Notes
+
+- `SafeStoragePath` is the single source of truth for FileUpload path safety; both feature
+  forms and both server-side actions delegate to it, so the grammar cannot drift.
+- Compensation and staged-file cleanup now share the same "run, verify absence, log on
+  failure, never mask the original exception" shape.
+- No new dependencies; controllers/public UI/routes untouched.

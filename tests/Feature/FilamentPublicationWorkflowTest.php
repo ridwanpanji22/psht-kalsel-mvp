@@ -421,7 +421,7 @@ class FilamentPublicationWorkflowTest extends TestCase
             'path' => 'private/gallery-media/foto.jpg',
             'is_public' => false,
         ]);
-        Storage::disk('local')->put('private/gallery-media/foto.jpg', 'image-bytes');
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', $this->validJpegBytes());
 
         $this->actingAs($operator);
 
@@ -449,7 +449,7 @@ class FilamentPublicationWorkflowTest extends TestCase
             'alt_text' => null,
             'is_public' => false,
         ]);
-        Storage::disk('local')->put('private/gallery-media/foto.jpg', 'image-bytes');
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', $this->validJpegBytes());
 
         $this->actingAs($operator);
 
@@ -478,7 +478,7 @@ class FilamentPublicationWorkflowTest extends TestCase
             'alt_text' => 'Peserta latihan',
             'is_public' => false,
         ]);
-        Storage::disk('local')->put('private/gallery-media/foto.jpg', 'image-bytes');
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', $this->validJpegBytes());
 
         $this->actingAs($operator);
 
@@ -542,7 +542,7 @@ class FilamentPublicationWorkflowTest extends TestCase
             'alt_text' => 'Peserta latihan',
             'is_public' => false,
         ]);
-        Storage::disk('local')->put('private/gallery-media/foto.jpg', 'image-bytes');
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', $this->validJpegBytes());
 
         Media::updating(function (): void {
             throw new \RuntimeException('database down');
@@ -910,14 +910,14 @@ class FilamentPublicationWorkflowTest extends TestCase
             'alt_text' => 'Peserta latihan',
             'is_public' => false,
         ]);
-        Storage::disk('local')->put('private/gallery-media/foto.jpg', 'image-bytes');
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', $this->validJpegBytes());
 
         // Simulate a post-commit cleanup failure: the local delete reports
         // failure and the file remains, but the public state must stand.
         $this->failLocalDiskDeletes(fn (): bool => false);
 
         Log::shouldReceive('error')->atLeast()->once()->withArgs(
-            fn (string $message): bool => str_contains($message, 'Berkas privat media masih ada'),
+            fn (string $message): bool => str_contains($message, 'Gagal menghapus berkas privat media setelah penerbitan'),
         );
 
         $this->actingAs($operator);
@@ -944,7 +944,7 @@ class FilamentPublicationWorkflowTest extends TestCase
             'alt_text' => 'Peserta latihan',
             'is_public' => false,
         ]);
-        Storage::disk('local')->put('private/gallery-media/foto.jpg', 'image-bytes');
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', $this->validJpegBytes());
 
         // Compensation delete also fails; the original DB exception must still win.
         $this->failPublicDiskDeletes(fn (): bool => false);
@@ -997,7 +997,7 @@ class FilamentPublicationWorkflowTest extends TestCase
         $this->failPublicDiskWritesAndDeletes();
 
         Log::shouldReceive('error')->atLeast()->once()->withArgs(
-            fn (string $message): bool => str_contains($message, 'Berkas publik masih ada setelah kegagalan salin'),
+            fn (string $message): bool => str_contains($message, 'Gagal membersihkan berkas publik setelah kegagalan salin'),
         );
 
         $this->actingAs($operator);
@@ -1005,6 +1005,234 @@ class FilamentPublicationWorkflowTest extends TestCase
         try {
             app(PublishMediaToPortal::class)->publish($operator, $media);
             $this->fail('Expected the failed copy to surface.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('copy failed', $exception->getMessage());
+        }
+
+        $media->refresh();
+        $this->assertFalse($media->is_public);
+        $this->assertSame('local', $media->disk);
+        Storage::disk('local')->assertExists('private/gallery-media/foto.jpg');
+    }
+
+    // ---------------------------------------------------------------------
+    // Fix round 2 — traversal-safe paths, probe/cleanup guards
+    // ---------------------------------------------------------------------
+
+    public function test_publish_media_refuses_a_traversal_path_and_leaves_the_sentinel_file_untouched(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+
+        // A sentinel private file that the traversal would otherwise reach.
+        Storage::disk('local')->put('private/event-covers/sentinel.jpg', $this->validJpegBytes());
+
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'local',
+            'path' => 'private/gallery-media/../event-covers/sentinel.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => false,
+        ]);
+
+        $this->actingAs($operator);
+
+        $this->expectException(ValidationException::class);
+        app(PublishMediaToPortal::class)->publish($operator, $media);
+
+        // The sentinel must be neither published nor deleted.
+        Storage::disk('local')->assertExists('private/event-covers/sentinel.jpg');
+        Storage::disk('public')->assertDirectoryEmpty('/');
+    }
+
+    public function test_event_cover_refuses_a_traversal_path_pointing_at_another_private_file(): void
+    {
+        Storage::fake('local');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $event = Event::factory()->create(['organization_unit_id' => $unit->id]);
+        Storage::disk('local')->put('private/gallery-media/sentinel.jpg', $this->validJpegBytes());
+
+        $this->actingAs($operator);
+
+        Livewire::test(EditEvent::class, ['record' => $event->getRouteKey()])
+            ->fillForm([
+                'cover_path' => ['private/event-covers/../gallery-media/sentinel.jpg'],
+                'cover_alt_text' => 'X',
+            ])
+            ->call('save')
+            ->assertHasFormErrors(['cover_path']);
+
+        $this->assertNull($event->refresh()->cover_path);
+        Storage::disk('local')->assertExists('private/gallery-media/sentinel.jpg');
+    }
+
+    public function test_media_upload_refuses_a_traversal_path(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = Gallery::factory()->create(['organization_unit_id' => $unit->id]);
+        Storage::disk('local')->put('private/event-covers/sentinel.jpg', $this->validJpegBytes());
+
+        $this->actingAs($operator);
+
+        Livewire::test(GalleryMediaRelationManager::class, [
+            'ownerRecord' => $gallery,
+            'pageClass' => EditGallery::class,
+        ])
+            ->callTableAction('create', data: [
+                'file' => ['private/gallery-media/../event-covers/sentinel.jpg'],
+                'alt_text' => 'X',
+                'sort_order' => 0,
+            ])
+            ->assertHasTableActionErrors(['file']);
+
+        $this->assertSame(0, Media::query()->count());
+        Storage::disk('local')->assertExists('private/event-covers/sentinel.jpg');
+    }
+
+    public function test_media_upload_rejects_unsafe_path_shapes(): void
+    {
+        Storage::fake('local');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = Gallery::factory()->create(['organization_unit_id' => $unit->id]);
+
+        $this->actingAs($operator);
+
+        foreach ([
+            '/private/gallery-media/x.jpg',              // absolute
+            'private\\gallery-media\\x.jpg',             // backslash
+            'private//gallery-media/x.jpg',              // repeated separator
+            'private/gallery-media/./x.jpg',             // dot segment
+            'private/gallery-media/x.jpg/',              // trailing separator
+            "private/gallery-media/x\0.jpg",             // null byte
+        ] as $path) {
+            Livewire::test(GalleryMediaRelationManager::class, [
+                'ownerRecord' => $gallery,
+                'pageClass' => EditGallery::class,
+            ])
+                ->callTableAction('create', data: [
+                    'file' => [$path],
+                    'alt_text' => 'X',
+                    'sort_order' => 0,
+                ])
+                ->assertHasTableActionErrors(['file']);
+        }
+
+        $this->assertSame(0, Media::query()->count());
+    }
+
+    public function test_media_upload_deletes_the_staged_file_when_the_metadata_probe_throws(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = Gallery::factory()->create(['organization_unit_id' => $unit->id]);
+
+        // mimeType() throws; the staged file must still be cleaned up.
+        $this->wrapDisk('local', mimeTypeResult: fn (): never => throw new \RuntimeException('probe failed'));
+
+        $this->actingAs($operator);
+
+        try {
+            Livewire::test(GalleryMediaRelationManager::class, [
+                'ownerRecord' => $gallery,
+                'pageClass' => EditGallery::class,
+            ])->callTableAction('create', data: [
+                'file' => UploadedFile::fake()->image('foto.jpg', 800, 600),
+                'alt_text' => 'Peserta latihan',
+                'sort_order' => 0,
+            ]);
+        } catch (\RuntimeException) {
+            // surfaced through the harness
+        }
+
+        $this->assertSame(0, Media::query()->count());
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_publish_media_surfaces_a_thrown_compensation_delete_without_masking_the_db_exception(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'local',
+            'path' => 'private/gallery-media/foto.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => false,
+        ]);
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', $this->validJpegBytes());
+
+        $this->wrapDisk('public', deleteResult: fn (): never => throw new \RuntimeException('delete failed'));
+
+        Log::shouldReceive('error')->atLeast()->once()->withArgs(
+            fn (string $message): bool => str_contains($message, 'Gagal membersihkan berkas publik setelah kegagalan basis data'),
+        );
+
+        Media::updating(function (): void {
+            throw new \RuntimeException('database down');
+        });
+
+        try {
+            app(PublishMediaToPortal::class)->publish($operator, $media);
+            $this->fail('Expected the DB exception to bubble up.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('database down', $exception->getMessage());
+        } finally {
+            Media::flushEventListeners();
+        }
+
+        $media->refresh();
+        $this->assertFalse($media->is_public);
+        $this->assertSame('local', $media->disk);
+        Storage::disk('local')->assertExists('private/gallery-media/foto.jpg');
+    }
+
+    public function test_publish_media_surfaces_a_thrown_copy_compensation_delete_without_masking_the_copy_exception(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'local',
+            'path' => 'private/gallery-media/foto.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => false,
+        ]);
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', $this->validJpegBytes());
+
+        $this->wrapDisk(
+            'public',
+            deleteResult: fn (): never => throw new \RuntimeException('delete failed'),
+            putResult: fn (): never => throw new \RuntimeException('copy failed'),
+        );
+
+        Log::shouldReceive('error')->atLeast()->once()->withArgs(
+            fn (string $message): bool => str_contains($message, 'Gagal membersihkan berkas publik setelah kegagalan salin'),
+        );
+
+        $this->actingAs($operator);
+
+        try {
+            app(PublishMediaToPortal::class)->publish($operator, $media);
+            $this->fail('Expected the copy exception to bubble up.');
         } catch (\RuntimeException $exception) {
             $this->assertSame('copy failed', $exception->getMessage());
         }
@@ -1038,17 +1266,18 @@ class FilamentPublicationWorkflowTest extends TestCase
      * Rebind a disk to a thin adapter whose `delete()`/`put()` results are
      * controlled, so cleanup-failure handling can be exercised deterministically.
      */
-    private function wrapDisk(string $disk, ?\Closure $deleteResult = null, ?\Closure $putResult = null): void
+    private function wrapDisk(string $disk, ?\Closure $deleteResult = null, ?\Closure $putResult = null, ?\Closure $mimeTypeResult = null): void
     {
         /** @var FilesystemAdapter $original */
         $original = Storage::disk($disk);
 
-        $wrapper = new class($original, $deleteResult, $putResult) extends FilesystemAdapter
+        $wrapper = new class($original, $deleteResult, $putResult, $mimeTypeResult) extends FilesystemAdapter
         {
             public function __construct(
                 FilesystemAdapter $inner,
                 private ?\Closure $deleteResult,
                 private ?\Closure $putResult,
+                private ?\Closure $mimeTypeResult,
             ) {
                 parent::__construct($inner->getDriver(), $inner->getAdapter(), $inner->getConfig());
             }
@@ -1061,6 +1290,11 @@ class FilamentPublicationWorkflowTest extends TestCase
             public function put($path, $contents, $options = [])
             {
                 return $this->putResult ? ($this->putResult)() : parent::put($path, $contents, $options);
+            }
+
+            public function mimeType($path)
+            {
+                return $this->mimeTypeResult ? ($this->mimeTypeResult)() : parent::mimeType($path);
             }
         };
 
