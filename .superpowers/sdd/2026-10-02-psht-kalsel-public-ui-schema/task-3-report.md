@@ -16,12 +16,12 @@
 | `app/Http/Controllers/Public/GalleryController.php` | `category=all\|latihan\|kegiatan\|pembinaan` allowlist (default `all`); legacy null only under `all`; published parent; media eager-load filtered `is_public` + `disk=public` ordered `sort_order,id`; 12/page with query preservation |
 | `app/Http/Controllers/Public/TrainingLocationController.php` | `show(string $slug)` reusing the exact published+verified predicate with eager-loaded `organizationUnit` |
 | `app/Http/Controllers/Public/PublicMediaController.php` | Tightened predicate: media `is_public` + `disk=public` + album exists + status `Published` + `published_at` non-null |
-| `routes/web.php` | `public.events.cover` (`/kegiatan/{event}/sampul`), `public.training-locations.show` (`/tempat-latihan/{slug}`) — existing route names/contracts untouched |
+| `routes/web.php` | `public.events.cover` (`/kegiatan/{event:slug}/cover`), `public.training-locations.show` (`/tempat-latihan/{slug}`) — existing route names/contracts untouched |
 | `resources/views/public/training-locations/show.blade.php` | **New** minimal detail view (no map data) |
 | `resources/views/public/training-locations/index.blade.php` | Cards link to the show route; map JSON/query retained |
-| `tests/Feature/PublicRoutesQueryContractTest.php` | **New.** 33 focused feature tests |
+| `tests/Feature/PublicRoutesQueryContractTest.php` | **New.** 39 focused feature tests |
 
-No cover_path/disk/private-path is accepted from query/user input anywhere; the cover route binds `{event}` by route model binding and only ever reads `$event->cover_path`.
+No cover_path/disk/private-path is accepted from query/user input anywhere; the cover route binds `{event:slug}` by route model binding and only ever reads `$event->cover_path`.
 
 ---
 
@@ -113,7 +113,7 @@ Each mutation was applied, the targeted test observed failing, then reverted fro
 | GET | `/galeri` | `public.galleries.index` | `GalleryController@index` | `category` query, default `all` |
 | GET | `/media/{media}` | `public.media.show` | `PublicMediaController` | tightened predicate |
 
-Existing route names and URLs are preserved. Route declaration order guarantees the static path `/kegiatan/{slug}` (declared first) wins over `/kegiatan/{event}/sampul`, so an event slug named `sampul` still resolves to `public.events.show`.
+Existing route names and URLs are preserved. Route declaration order guarantees the two-segment path `/kegiatan/{event:slug}/cover` (declared after `/kegiatan/{slug}`) never shadows the single-segment `/kegiatan/{slug}` show route, so `/kegiatan/{slug}` still resolves to `public.events.show`; a cover URL needs the extra `/cover` segment.
 
 ---
 
