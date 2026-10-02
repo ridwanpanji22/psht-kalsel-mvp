@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Public;
 
+use App\Enums\PublicationStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Support\SafeStoragePath;
@@ -27,9 +28,11 @@ class EventCoverController extends Controller
 
     public function __invoke(Event $event): StreamedResponse
     {
-        // `published()` requires status published AND published_at non-null.
+        // The route model-binding uses the event slug (`{event:slug}`). Both
+        // the `status` and `published_at` conditions of the published scope
+        // must hold; a draft/pending/missing event resolves as 404 here.
         abort_unless(
-            Event::query()->published()->whereKey($event->getKey())->exists(),
+            $event->status === PublicationStatus::Published && $event->published_at !== null,
             404,
         );
 

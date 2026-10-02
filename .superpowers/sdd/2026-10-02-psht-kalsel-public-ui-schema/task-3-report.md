@@ -107,7 +107,7 @@ Each mutation was applied, the targeted test observed failing, then reverted fro
 |---|---|---|---|---|
 | GET | `/kegiatan` | `public.events.index` | `EventController@index` | `period` query, default `upcoming` |
 | GET | `/kegiatan/{slug}` | `public.events.show` | `EventController@show` | own slug, published only |
-| GET | `/kegiatan/{event}/sampul` | `public.events.cover` | `EventCoverController` (invokable) | route model binding by event id |
+| GET | `/kegiatan/{event:slug}/cover` | `public.events.cover` | `EventCoverController` (invokable) | route model binding on **slug** |
 | GET | `/tempat-latihan` | `public.training-locations.index` | `TrainingLocationController@index` | unchanged |
 | GET | `/tempat-latihan/{slug}` | `public.training-locations.show` | `TrainingLocationController@show` | published + verified |
 | GET | `/galeri` | `public.galleries.index` | `GalleryController@index` | `category` query, default `all` |
@@ -122,11 +122,13 @@ Existing route names and URLs are preserved. Route declaration order guarantees 
 | Resource | State | Public list HTML | Cover/media application route | HTTP result |
 |---|---|---|---|---|
 | Event | Draft / `published_at` null | excluded | — | — |
-| Event | Published, no cover | shown | `/kegiatan/{id}/sampul` | **404** |
-| Event | Published, cover file present | shown, no path leaked | `/kegiatan/{id}/sampul` | 200 inline image, MIME from file content, `nosniff` |
-| Event | Published, cover file missing | shown | `/kegiatan/{id}/sampul` | **404** |
-| Event | Published, unsafe persisted `cover_path` (traversal/absolute/backslash/nul/dot) | shown | `/kegiatan/{id}/sampul` | **404** (no cross-prefix file read) |
-| Event | Published, cover file not an image | shown | `/kegiatan/{id}/sampul` | **404** |
+| Event | Published, no cover | shown | `/kegiatan/{event:slug}/cover` | **404** |
+| Event | Published, cover file present | shown, no path leaked | `/kegiatan/{event:slug}/cover` | 200 inline image, MIME from file content, `nosniff` |
+| Event | Published, cover file missing | shown | `/kegiatan/{event:slug}/cover` | **404** |
+| Event | Published, unsafe persisted `cover_path` (traversal/absolute/backslash/nul/dot) | shown | `/kegiatan/{event:slug}/cover` | **404** (no cross-prefix file read) |
+| Event | Published, cover file not an image | shown | `/kegiatan/{event:slug}/cover` | **404** |
+| Event | Published, numeric-looking slug (`12345`) | shown | `/kegiatan/12345/cover` | 200 only when `12345` is that event's slug |
+| Event | Published, addressed by numeric DB id | shown | `/kegiatan/{id}/cover` when `{id}` ≠ slug | **404** (binding is on slug) |
 | Media | `is_public=false` | excluded | `/media/{id}` | **404** |
 | Media | `disk=local` | excluded | `/media/{id}` | **404** |
 | Media | `is_public`+`disk=public`, album Draft | excluded | `/media/{id}` | **404** |
@@ -137,7 +139,7 @@ Existing route names and URLs are preserved. Route declaration order guarantees 
 | Location | Published + `verified_at` set | listed, card links to show route | `/tempat-latihan/{slug}` | 200, own slug only (no default fallback) |
 | Gallery | legacy `category=null` | only under `category=all` | — | — |
 
-Key guarantees: no `cover_path` / disk / private path appears in any public HTML response; the cover route never accepts a path from query/user input (route-model bound `{event}` only); event/list filters are allowlisted with safe defaults; MIME type comes from the stored bytes, not the filename or request.
+Key guarantees: no `cover_path` / disk / private path appears in any public HTML response; the cover route never accepts a path from query/user input (route-model bound `{event:slug}` only); event/list filters are allowlisted with safe defaults; event lists use a deterministic `starts_at` + `id` tie-break for every period; MIME type comes from the stored bytes, not the filename or request.
 
 ---
 
@@ -154,3 +156,56 @@ Key guarantees: no `cover_path` / disk / private path appears in any public HTML
 3. **`categories` filter semantics.** Legacy `category=null` albums appear only under `all`; once Task 4 exposes category filters, operators must classify legacy albums for them to appear under a specific filter (intended per plan).
 4. **Map payload has no invalid-slug exposure.** The location show view intentionally renders no map data in Task 3; Task 4's single-marker map must consume the controller bound record only. The existing invalid-slug test asserts no `training-location-data`/`data-map`/coordinate leakage on 404.
 5. **No full suite / build / lint mid-flight** per brief; only focused + adjacent PHPUnit suites and Pint on the dirty set were run.
+
+---
+
+## 7. Fix round 1/5
+
+Addressed two review findings. No Blade redesign.
+
+### 7.1 Finding 1 (Important) — cover route must be `GET /kegiatan/{event:slug}/cover`
+
+**Change:** route URI moved from `/kegiatan/{event}/sampul` (id binding) to `/kegiatan/{event:slug}/cover` with an explicit slug binding; `EventCoverController` now enforces published state directly on the slug-bound `Event`. The generic `/kegiatan/{slug}` show route is untouched and still works (the cover route has an extra `/cover` segment, so the two never collide).
+
+**RED (pre-fix code + post-fix tests):** `vendor/bin/phpunit tests/Feature/PublicRoutesQueryContractTest.php`
+
+```
+result=failed tests=39 passed=36 failed=3
+FAIL test_event_cover_route_url_uses_the_event_slug_not_its_id
+  Failed asserting that two strings are identical. Expected '/kegiatan/kegiatan-bersampul/cover' got '/kegiatan/1/sampul'
+FAIL test_event_cover_route_streams_a_published_local_cover_as_inline_image
+  Expected response status code [200] but received 404.
+FAIL test_event_cover_route_resolves_when_the_slug_is_numeric
+  Expected response status code [200] but received 404.
+```
+
+**GREEN (post-fix):** `vendor/bin/phpunit tests/Feature/PublicRoutesQueryContractTest.php`
+
+```
+{"tool":"phpunit","result":"passed","tests":39,"passed":39,"assertions":134}
+```
+
+New tests: `test_event_cover_route_url_uses_the_event_slug_not_its_id` (route-generated URL path === `/kegiatan/{slug}/cover`), `test_event_cover_route_streams_a_published_local_cover_as_inline_image` (explicit `/kegiatan/{slug}/cover` resolves), `test_event_cover_route_does_not_resolve_by_numeric_id_when_slug_differs` (`/kegiatan/{id}/cover` 404 when id ≠ slug), `test_event_cover_route_resolves_when_the_slug_is_numeric` (slug `12345` resolves only as that event's slug; another event's numeric id 404s).
+
+### 7.2 Finding 2 (Minor) — deterministic `id` tie-break
+
+**Change:** `EventController::index` orders every period by `starts_at` plus an explicit `id` tie-break: `upcoming` → `starts_at ASC, id ASC`; `past` → `starts_at DESC, id DESC` (recent-first); `all` → `starts_at ASC, id ASC`. This is explicit and cross-driver deterministic.
+
+**Tests** (>12 tied events per period, in `PublicRoutesQueryContractTest`):
+`test_events_index_upcoming_breaks_tied_starts_at_by_id_ascending_without_skips_or_duplicates`, `test_events_index_past_breaks_tied_starts_at_by_id_descending_recent_first`, `test_events_index_all_breaks_tied_starts_at_by_id_ascending_deterministically`. Each creates 15 events sharing one `starts_at`, then asserts the exact page-1 ids, exact page-2 ids, empty page intersection, and full 15-id coverage (no duplicate/skip). No implementation-text assertions (only observable ids/order).
+
+**Sensitivity:** a wrong-direction mutation (e.g. `upcoming` using `orderByDesc('id')`) fails the tie test (`result=failed`, 7 assertions, exit non-zero). On SQLite the *correct* explicit direction and its incidental tie order coincide, so removing only the tie-break is not distinguishable on that driver — the tests still fully document and enforce the intended cross-driver contract and would catch a real direction/order regression, duplicate, or skip.
+
+### 7.3 Fix-round verification
+
+Command: `vendor/bin/phpunit PublicRoutesQueryContractTest + PublicPortalTest + PublicationWorkflowTest + PrivateMediaAccessTest + PublicUiPublicationSchemaTest + FilamentPublicationWorkflowTest + FirebaseAuthEndpointsTest + UnitScopeAuthorizationTest`
+
+```
+{"tool":"phpunit","result":"passed","tests":139,"passed":139,"assertions":680}
+```
+
+Pint on dirty set: `{"tool":"pint","result":"passed"}`. Route list confirms `kegiatan/{event:slug}/cover` (name `public.events.cover`) and generic `kegiatan/{slug}` (name `public.events.show`) coexist. Stable ordering is explicitly present in code.
+
+### 7.4 Commit
+
+`fix(public): bind event cover route on slug and page deterministically` — route URI/binding, `EventCoverController` published check, event `id` tie-breaks, and updated/added tests.

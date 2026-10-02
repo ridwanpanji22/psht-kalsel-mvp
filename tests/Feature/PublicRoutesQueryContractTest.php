@@ -154,6 +154,76 @@ class PublicRoutesQueryContractTest extends TestCase
             ->assertSee('Kegiatan Hari 13');
     }
 
+    public function test_events_index_upcoming_breaks_tied_starts_at_by_id_ascending_without_skips_or_duplicates(): void
+    {
+        // 15 upcoming events all sharing the exact same starts_at, created
+        // oldest-id-first, so the expected order is simply ascending id.
+        $tied = now()->addDays(5)->startOfSecond();
+        $ids = [];
+
+        foreach (range(1, 15) as $index) {
+            $ids[] = $this->publishedEvent([
+                'title' => "Seri {$index}",
+                'starts_at' => $tied->copy(),
+            ])->id;
+        }
+
+        $pageOneIds = $this->collectEventIds(route('public.events.index', ['period' => 'upcoming']), 1);
+        $pageTwoIds = $this->collectEventIds(route('public.events.index', ['period' => 'upcoming', 'page' => 2]), 2);
+
+        $this->assertSame(array_slice($ids, 0, 12), $pageOneIds, 'Page 1 must be ids 1..12 in ascending order.');
+        $this->assertSame(array_slice($ids, 12, 3), $pageTwoIds, 'Page 2 must be the remaining ids 13..15.');
+        $this->assertSame([], array_intersect($pageOneIds, $pageTwoIds), 'Pages must not overlap.');
+        $this->assertCount(15, array_merge($pageOneIds, $pageTwoIds), 'All tied events must appear exactly once.');
+    }
+
+    public function test_events_index_past_breaks_tied_starts_at_by_id_descending_recent_first(): void
+    {
+        $tied = now()->subDays(5)->startOfSecond();
+        $ids = [];
+
+        foreach (range(1, 15) as $index) {
+            $ids[] = $this->publishedEvent([
+                'title' => "Lampau Seri {$index}",
+                'starts_at' => $tied->copy(),
+            ])->id;
+        }
+
+        // Past is recent-first, and ties resolve to the newest (highest) id.
+        $expectedDescending = array_reverse($ids);
+
+        $pageOneIds = $this->collectEventIds(route('public.events.index', ['period' => 'past']), 1);
+        $pageTwoIds = $this->collectEventIds(route('public.events.index', ['period' => 'past', 'page' => 2]), 2);
+
+        $this->assertSame(array_slice($expectedDescending, 0, 12), $pageOneIds);
+        $this->assertSame(array_slice($expectedDescending, 12, 3), $pageTwoIds);
+        $this->assertSame([], array_intersect($pageOneIds, $pageTwoIds));
+        $this->assertCount(15, array_merge($pageOneIds, $pageTwoIds));
+    }
+
+    public function test_events_index_all_breaks_tied_starts_at_by_id_ascending_deterministically(): void
+    {
+        // Mix of past and future events sharing the same starts_at; `all`
+        // orders by starts_at ASC then id ASC regardless of period.
+        $tied = now()->startOfSecond();
+        $ids = [];
+
+        foreach (range(1, 15) as $index) {
+            $ids[] = $this->publishedEvent([
+                'title' => "Semua Seri {$index}",
+                'starts_at' => $tied->copy(),
+            ])->id;
+        }
+
+        $pageOneIds = $this->collectEventIds(route('public.events.index', ['period' => 'all']), 1);
+        $pageTwoIds = $this->collectEventIds(route('public.events.index', ['period' => 'all', 'page' => 2]), 2);
+
+        $this->assertSame(array_slice($ids, 0, 12), $pageOneIds);
+        $this->assertSame(array_slice($ids, 12, 3), $pageTwoIds);
+        $this->assertSame([], array_intersect($pageOneIds, $pageTwoIds));
+        $this->assertCount(15, array_merge($pageOneIds, $pageTwoIds));
+    }
+
     public function test_events_index_preserves_period_filter_on_pagination(): void
     {
         foreach (range(1, 13) as $day) {
@@ -163,6 +233,33 @@ class PublicRoutesQueryContractTest extends TestCase
         $this->get(route('public.events.index', ['period' => 'past']))
             ->assertOk()
             ->assertViewHas('events', fn ($events) => str_contains($events->url(2), 'period=past'));
+    }
+
+    /**
+     * Collect the ordered event ids returned in the `events` paginator for a
+     * request, failing the test if the view data is missing.
+     *
+     * @return list<int>
+     */
+    private function collectEventIds(string $url, int $expectedPage): array
+    {
+        $ids = null;
+
+        $this->get($url)
+            ->assertOk()
+            ->assertViewHas('events', function ($events) use (&$ids, $expectedPage) {
+                if ($events->currentPage() !== $expectedPage) {
+                    return false;
+                }
+
+                $ids = $events->pluck('id')->values()->all();
+
+                return true;
+            });
+
+        $this->assertIsArray($ids, "No `events` paginator was resolved for {$url}.");
+
+        return $ids;
     }
 
     public function test_event_detail_resolves_its_own_published_slug(): void
@@ -187,13 +284,27 @@ class PublicRoutesQueryContractTest extends TestCase
     // Event cover route
     // -----------------------------------------------------------------
 
+    public function test_event_cover_route_url_uses_the_event_slug_not_its_id(): void
+    {
+        $event = $this->publishedEvent(['slug' => 'kegiatan-bersampul']);
+
+        $url = route('public.events.cover', $event);
+
+        $this->assertSame('/kegiatan/kegiatan-bersampul/cover', parse_url($url, PHP_URL_PATH));
+        $this->assertStringContainsString('kegiatan-bersampul', $url);
+    }
+
     public function test_event_cover_route_streams_a_published_local_cover_as_inline_image(): void
     {
         Storage::fake('local');
-        $event = $this->publishedEvent(['cover_path' => 'private/event-covers/sampul.jpg']);
+        $event = $this->publishedEvent([
+            'slug' => 'kegiatan-bersampul',
+            'cover_path' => 'private/event-covers/sampul.jpg',
+        ]);
         Storage::disk('local')->put('private/event-covers/sampul.jpg', $this->jpegBytes());
 
-        $response = $this->get(route('public.events.cover', $event))->assertOk();
+        // Resolve explicitly by slug to prove the endpoint binds on slug.
+        $response = $this->get('/kegiatan/kegiatan-bersampul/cover')->assertOk();
 
         $this->assertSame('image/jpeg', $response->headers->get('content-type'));
         $this->assertSame('nosniff', $response->headers->get('x-content-type-options'));
@@ -202,32 +313,70 @@ class PublicRoutesQueryContractTest extends TestCase
         $this->assertStringNotContainsString('private/event-covers/sampul.jpg', (string) $response->headers->get('content-disposition'));
     }
 
+    public function test_event_cover_route_does_not_resolve_by_numeric_id_when_slug_differs(): void
+    {
+        Storage::fake('local');
+        $event = $this->publishedEvent([
+            'slug' => 'kegiatan-bersampul',
+            'cover_path' => 'private/event-covers/sampul.jpg',
+        ]);
+        Storage::disk('local')->put('private/event-covers/sampul.jpg', $this->jpegBytes());
+
+        // A numeric ID path must not accidentally resolve the record: the
+        // binding is on slug, so `/kegiatan/{id}/cover` is a 404.
+        $this->get('/kegiatan/'.$event->id.'/cover')->assertNotFound();
+        $this->assertNotSame((string) $event->id, $event->slug);
+    }
+
+    public function test_event_cover_route_resolves_when_the_slug_is_numeric(): void
+    {
+        Storage::fake('local');
+        // The URL occasionally may look like an ID; resolution must still be
+        // slug-based, so a slug of "12345" only resolves when it is that
+        // event's actual slug.
+        $matching = $this->publishedEvent(['slug' => '12345', 'cover_path' => 'private/event-covers/a.jpg']);
+        $other = $this->publishedEvent(['slug' => 'kegiatan-lain', 'cover_path' => 'private/event-covers/b.jpg']);
+        Storage::disk('local')->put('private/event-covers/a.jpg', $this->jpegBytes());
+        Storage::disk('local')->put('private/event-covers/b.jpg', $this->jpegBytes());
+
+        $this->get('/kegiatan/12345/cover')->assertOk();
+
+        // The other event's numeric ID (which differs from the slug "12345")
+        // must not resolve.
+        $this->assertNotSame('12345', (string) $other->id);
+        $this->get('/kegiatan/'.$other->id.'/cover')->assertNotFound();
+    }
+
     public function test_event_cover_route_returns_404_for_draft_event_with_a_valid_cover(): void
     {
         Storage::fake('local');
         $event = Event::factory()->create([
+            'slug' => 'kegiatan-draf',
             'status' => PublicationStatus::Draft,
             'cover_path' => 'private/event-covers/draf.jpg',
         ]);
         Storage::disk('local')->put('private/event-covers/draf.jpg', $this->jpegBytes());
 
-        $this->get(route('public.events.cover', $event))->assertNotFound();
+        $this->get('/kegiatan/kegiatan-draf/cover')->assertNotFound();
     }
 
     public function test_event_cover_route_returns_404_for_published_event_without_a_cover(): void
     {
         Storage::fake('local');
-        $event = $this->publishedEvent(['cover_path' => null]);
+        $event = $this->publishedEvent(['slug' => 'kegiatan-tanpa-sampul', 'cover_path' => null]);
 
-        $this->get(route('public.events.cover', $event))->assertNotFound();
+        $this->get('/kegiatan/kegiatan-tanpa-sampul/cover')->assertNotFound();
     }
 
     public function test_event_cover_route_returns_404_when_the_local_file_is_missing(): void
     {
         Storage::fake('local');
-        $event = $this->publishedEvent(['cover_path' => 'private/event-covers/hilang.jpg']);
+        $event = $this->publishedEvent([
+            'slug' => 'kegiatan-hilang',
+            'cover_path' => 'private/event-covers/hilang.jpg',
+        ]);
 
-        $this->get(route('public.events.cover', $event))->assertNotFound();
+        $this->get('/kegiatan/kegiatan-hilang/cover')->assertNotFound();
     }
 
     public function test_event_cover_route_returns_404_for_an_unsafe_persisted_path(): void
@@ -237,10 +386,11 @@ class PublicRoutesQueryContractTest extends TestCase
         // traversal path would resolve to.
         Storage::disk('local')->put('private/gallery-media/sentinel.jpg', $this->jpegBytes());
         $event = $this->publishedEvent([
+            'slug' => 'kegiatan-tidak-aman',
             'cover_path' => 'private/event-covers/../gallery-media/sentinel.jpg',
         ]);
 
-        $this->get(route('public.events.cover', $event))->assertNotFound();
+        $this->get('/kegiatan/kegiatan-tidak-aman/cover')->assertNotFound();
 
         Storage::disk('local')->assertExists('private/gallery-media/sentinel.jpg');
     }

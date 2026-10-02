@@ -22,9 +22,9 @@ class EventController extends Controller
         $events = Event::query()
             ->published()
             ->select(['id', 'slug', 'title', 'description', 'starts_at', 'ends_at', 'venue', 'cover_path', 'cover_alt_text'])
-            ->when($period === 'upcoming', fn (Builder $query) => $query->where('starts_at', '>=', now())->orderBy('starts_at'))
-            ->when($period === 'past', fn (Builder $query) => $query->where('starts_at', '<', now())->orderByDesc('starts_at'))
-            ->when($period === 'all', fn (Builder $query) => $query->orderBy('starts_at'))
+            ->when($period === 'upcoming', fn (Builder $query) => $query->where('starts_at', '>=', now())->orderBy('starts_at')->orderBy('id'))
+            ->when($period === 'past', fn (Builder $query) => $query->where('starts_at', '<', now())->orderByDesc('starts_at')->orderByDesc('id'))
+            ->when($period === 'all', fn (Builder $query) => $query->orderBy('starts_at')->orderBy('id'))
             ->paginate(12)
             ->withQueryString();
 

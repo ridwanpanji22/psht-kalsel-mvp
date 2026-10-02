@@ -22,7 +22,7 @@ Route::get('/galeri', [GalleryController::class, 'index'])->name('public.galleri
 Route::get('/media/{media}', PublicMediaController::class)->name('public.media.show');
 Route::get('/kegiatan', [EventController::class, 'index'])->name('public.events.index');
 Route::get('/kegiatan/{slug}', [EventController::class, 'show'])->name('public.events.show');
-Route::get('/kegiatan/{event}/sampul', EventCoverController::class)->name('public.events.cover');
+Route::get('/kegiatan/{event:slug}/cover', EventCoverController::class)->name('public.events.cover');
 Route::get('/tempat-latihan', [TrainingLocationController::class, 'index'])->name('public.training-locations.index');
 Route::get('/tempat-latihan/{slug}', [TrainingLocationController::class, 'show'])->name('public.training-locations.show');
 
