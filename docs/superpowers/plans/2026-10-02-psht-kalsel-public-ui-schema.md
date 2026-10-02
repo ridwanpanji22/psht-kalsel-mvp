@@ -44,12 +44,12 @@
 
 **Interfaces produced:** `GalleryCategory` enum values/labels; `Gallery::media()` ordered by `sort_order,id`; `Media::isPublic` cast, `sort_order` integer; `Event::cover_path`/`cover_alt_text` nullable; Filament edit surfaces use these fields.
 
-- [ ] Write tests first for nullable existing record compatibility, allowed category values, ordered media default/tie behavior, and failed migration data preservation.
+- [ ] Write tests first for nullable existing record compatibility, enum casting/allowed category values through real write validation, ordered media default/tie behavior, and migration data preservation.
 - [ ] Run targeted tests to see expected RED.
-- [ ] Add migration with only: nullable `events.cover_path`, nullable `events.cover_alt_text`, nullable `galleries.category` plus DB check constraint for null/3 values, `media.sort_order` unsigned default `0`, index `media(gallery_id,is_public,sort_order,id)`, and index `galleries(status,category,published_at)`.
-- [ ] Implement `GalleryCategory` enum with Indonesian labels `Latihan`, `Kegiatan`, `Pembinaan`; add category cast only if enum/null casting matches current model conventions.
+- [ ] Add migration with only: nullable `events.cover_path`, nullable `events.cover_alt_text`, nullable `galleries.category`, `media.sort_order` unsigned default `0`, index `media(gallery_id,is_public,sort_order,id)`, and index `galleries(status,category,published_at)`. Do not add raw driver-specific check SQL.
+- [ ] Implement `GalleryCategory` enum with Indonesian labels `Latihan`, `Kegiatan`, `Pembinaan`; add nullable category cast and validate the enum at every Filament/write boundary.
 - [ ] Update Event/Gallery/Media fillable/casts/relations; keep migration `down()` limited to newly added index/columns.
-- [ ] Run migration up/down on SQLite test DB; assert old event/gallery/media records still load with null/default values; test category constraints and media ordering tie-break.
+- [ ] Run migration up/down on SQLite test DB; assert old event/gallery/media records still load with null/default values; test write-boundary category validation and media ordering tie-break.
 - [ ] Commit schema/model foundation.
 
 ### Task 2: Add Filament Event and Gallery Edit Workflows

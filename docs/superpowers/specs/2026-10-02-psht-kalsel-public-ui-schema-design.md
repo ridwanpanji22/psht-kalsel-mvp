@@ -62,7 +62,7 @@ Menerapkan tampilan dan interaksi preview yang telah disetujui ke portal MVP Bla
 
 - Tambah nullable `galleries.category` (`VARCHAR`) yang hanya menerima enum backed `App\Enums\GalleryCategory`: `latihan`, `kegiatan`, `pembinaan`.
 - Null diperbolehkan untuk mempertahankan semua row lama tanpa tebakan atau backfill.
-- Database check constraint menerima `NULL` atau tepat tiga nilai kategori. Tambah index gabungan untuk query daftar publik `(status, category, published_at)`.
+- Tambah index gabungan untuk query daftar publik `(status, category, published_at)`. Nilai kategori dijaga oleh enum cast dan validasi pada setiap write path; tidak memakai raw database check constraint agar migration konsisten pada MySQL 8 dan SQLite test DB.
 - Gallery create/update form mewajibkan salah satu kategori. Record lama kategori null ditampilkan pada UI internal sebagai "Belum dikategorikan"; operator dapat mengklasifikasikan ketika mengedit.
 - Tidak ada tabel categories, multi-select, pivot, atau kategori custom.
 
