@@ -59,10 +59,30 @@ class AturSampulEvent
         }
 
         if ($oldCoverPath !== null && $oldCoverPath !== $newCoverPath) {
-            $this->deleteQuietly($oldCoverPath);
+            $this->deletePreviousCoverQuietly($event, (string) $oldCoverPath);
         }
 
         return $event->refresh();
+    }
+
+    /**
+     * Delete a persisted previous cover only when it is a traversal-safe
+     * event-cover path. A malformed value (traversal, backslash, null byte,
+     * absolute path, dot segment) must never reach the filesystem; it is
+     * reported and skipped so the record update still proceeds safely.
+     */
+    private function deletePreviousCoverQuietly(Event $event, string $oldCoverPath): void
+    {
+        if (! SafeStoragePath::isSafe($oldCoverPath, [SafeStoragePath::EVENT_COVER_PREFIX])) {
+            Log::error('Lokasi sampul lama tidak aman dan dilewati penghapusannya.', [
+                'event_id' => $event->getKey(),
+                'path' => $oldCoverPath,
+            ]);
+
+            return;
+        }
+
+        $this->deleteQuietly($oldCoverPath);
     }
 
     private function deleteQuietly(string $path): void

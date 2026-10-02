@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class FilamentPublicationWorkflowTest extends TestCase
@@ -226,6 +227,91 @@ class FilamentPublicationWorkflowTest extends TestCase
         $this->assertNull($event->cover_path);
         $this->assertNull($event->cover_alt_text);
         Storage::disk('local')->assertMissing('private/event-covers/old.jpg');
+    }
+
+    public function test_atur_sampul_action_never_deletes_an_unsafe_persisted_old_cover_path(): void
+    {
+        Storage::fake('local');
+        Log::spy();
+        $unit = OrganizationUnit::factory()->create();
+        $event = Event::factory()->create([
+            'organization_unit_id' => $unit->id,
+            'cover_path' => 'private/event-covers/../gallery-media/sentinel.jpg',
+            'cover_alt_text' => 'Lama',
+        ]);
+
+        // A sentinel file the unvalidated old path would resolve to.
+        Storage::disk('local')->put('private/gallery-media/sentinel.jpg', $this->validJpegBytes());
+
+        // Replacing the malformed cover with a safe one.
+        Storage::disk('local')->put('private/event-covers/new.jpg', $this->validJpegBytes());
+        app(AturSampulEvent::class)->apply($event, 'private/event-covers/new.jpg', 'Baru');
+
+        $event->refresh();
+        $this->assertSame('private/event-covers/new.jpg', $event->cover_path);
+        $this->assertSame('Baru', $event->cover_alt_text);
+        Storage::disk('local')->assertExists('private/gallery-media/sentinel.jpg');
+
+        Log::shouldHaveReceived('error')->withArgs(
+            fn (string $message): bool => str_contains($message, 'Lokasi sampul lama tidak aman'),
+        )->atLeast()->once();
+    }
+
+    public function test_atur_sampul_action_never_deletes_an_unsafe_old_cover_when_clearing(): void
+    {
+        Storage::fake('local');
+        Log::spy();
+        $unit = OrganizationUnit::factory()->create();
+        $event = Event::factory()->create([
+            'organization_unit_id' => $unit->id,
+            'cover_path' => 'private/event-covers/../gallery-media/sentinel.jpg',
+            'cover_alt_text' => 'Lama',
+        ]);
+        Storage::disk('local')->put('private/gallery-media/sentinel.jpg', $this->validJpegBytes());
+
+        app(AturSampulEvent::class)->apply($event, null, null);
+
+        $event->refresh();
+        $this->assertNull($event->cover_path);
+        $this->assertNull($event->cover_alt_text);
+        Storage::disk('local')->assertExists('private/gallery-media/sentinel.jpg');
+        Log::shouldHaveReceived('error')->atLeast()->once();
+    }
+
+    #[DataProvider('unsafeOldCoverPaths')]
+    public function test_atur_sampul_action_ignores_any_unsafe_old_cover_path_shape(string $oldPath): void
+    {
+        Storage::fake('local');
+        Log::spy();
+        $unit = OrganizationUnit::factory()->create();
+        $event = Event::factory()->create([
+            'organization_unit_id' => $unit->id,
+            'cover_path' => $oldPath,
+            'cover_alt_text' => 'Lama',
+        ]);
+
+        Storage::disk('local')->put('private/gallery-media/sentinel.jpg', $this->validJpegBytes());
+        Storage::disk('local')->put('private/event-covers/new.jpg', $this->validJpegBytes());
+
+        app(AturSampulEvent::class)->apply($event, 'private/event-covers/new.jpg', 'Baru');
+
+        $this->assertSame('private/event-covers/new.jpg', $event->refresh()->cover_path);
+        Storage::disk('local')->assertExists('private/gallery-media/sentinel.jpg');
+        Log::shouldHaveReceived('error')->atLeast()->once();
+    }
+
+    /**
+     * @return array<string, array{0: string}>
+     */
+    public static function unsafeOldCoverPaths(): array
+    {
+        return [
+            'traversal' => ['private/event-covers/../gallery-media/sentinel.jpg'],
+            'backslash' => ['private\\event-covers\\x.jpg'],
+            'null byte' => ["private/event-covers/x\0.jpg"],
+            'absolute' => ['/private/event-covers/x.jpg'],
+            'dot segment' => ['private/event-covers/./x.jpg'],
+        ];
     }
 
     public function test_event_cover_alt_text_is_required_when_a_cover_is_present(): void
@@ -1041,12 +1127,20 @@ class FilamentPublicationWorkflowTest extends TestCase
 
         $this->actingAs($operator);
 
-        $this->expectException(ValidationException::class);
-        app(PublishMediaToPortal::class)->publish($operator, $media);
+        $threw = false;
 
-        // The sentinel must be neither published nor deleted.
+        try {
+            app(PublishMediaToPortal::class)->publish($operator, $media);
+        } catch (ValidationException) {
+            $threw = true;
+        }
+
+        // Side-effect assertions run regardless of whether the guard threw.
         Storage::disk('local')->assertExists('private/event-covers/sentinel.jpg');
         Storage::disk('public')->assertDirectoryEmpty('/');
+        $this->assertFalse($media->refresh()->is_public);
+        $this->assertSame('local', $media->disk);
+        $this->assertTrue($threw, 'Expected a traversal path to be refused.');
     }
 
     public function test_event_cover_refuses_a_traversal_path_pointing_at_another_private_file(): void

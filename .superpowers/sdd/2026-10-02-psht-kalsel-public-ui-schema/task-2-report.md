@@ -376,3 +376,78 @@ All mutations reverted; focused suite returned green (41/41).
 - Compensation and staged-file cleanup now share the same "run, verify absence, log on
   failure, never mask the original exception" shape.
 - No new dependencies; controllers/public UI/routes untouched.
+
+---
+
+## 9. Fix round 3 — reviewer findings resolved
+
+**Commit:** `28845dc2e9e1f9a055f2c21a11891930eb626032` — `fix(public): validate persisted old cover
+path before deletion` (base: `590f57f`). Both round-3 findings resolved with TDD
+(RED → GREEN) and mutation-proven.
+
+### 9.1 Findings and fixes
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| 1 | Important | `AturSampulEvent` deleted a persisted previous cover via `deleteQuietly($oldCoverPath)` without validating it, so a malformed stored value could resolve (via Flysystem `..` normalization) to another private file. | The old path is now validated with `SafeStoragePath::isSafe(..., [EVENT_COVER_PREFIX])` before any delete. An unsafe value is skipped with `Log::error('Lokasi sampul lama tidak aman dan dilewati penghapusannya.', ['event_id' => ..., 'path' => ...])`, and the record still updates to the safe new/null path. |
+| 2 | Minor | The traversal test used `expectException` before its sentinel/public assertions, so those assertions never ran. | Rewritten to catch the expected `ValidationException` explicitly, then assert the sentinel exists, the public disk is empty, and the record stays `disk=local, is_public=false`; the throw expectation is asserted last. |
+
+### 9.2 RED (before fixes)
+
+Command: `vendor/bin/phpunit --filter='test_atur_sampul_action_never_deletes_an_unsafe' tests/Feature/FilamentPublicationWorkflowTest.php`
+
+```
+tests 2 failures 2 errors 0
+  test_atur_sampul_action_never_deletes_an_unsafe_persisted_old_cover_path
+    Unable to find a file or directory at path [private/gallery-media/sentinel.jpg].
+  test_atur_sampul_action_never_deletes_an_unsafe_old_cover_when_clearing
+    Unable to find a file or directory at path [private/gallery-media/sentinel.jpg].
+```
+
+The unvalidated old traversal path resolved to and deleted the sentinel.
+
+### 9.3 GREEN (after fixes)
+
+Command: `vendor/bin/phpunit tests/Feature/FilamentPublicationWorkflowTest.php`
+
+```
+{"tool":"phpunit","result":"passed","tests":48,"passed":48,"assertions":309}
+```
+
+Focused suite: **48 tests, 48 passed, 309 assertions, 0 failures, 0 errors.**
+
+Adjacent suites (Task-1 schema, private media, publication workflow, Filament auth,
+unit isolation, unit-scope authorization, membership scope):
+
+```
+{"tool":"phpunit","result":"passed","tests":79,"passed":79,"assertions":413}
+```
+
+Pint: `{"tool":"pint","result":"passed"}`.
+
+### 9.4 Behavior
+
+- **Unsafe persisted old cover, replaced:** the sentinel under
+  `private/gallery-media/` is preserved; the record updates to the new safe cover; a
+  precise `Log::error` (with event ID and path) is emitted.
+- **Unsafe persisted old cover, cleared:** the sentinel is preserved; the record clears
+  `cover_path`/`cover_alt_text`; a `Log::error` is emitted.
+- **Unsafe shapes matrix:** traversal, backslash, null byte, absolute, and dot-segment old
+  values are all skipped without touching storage (parameterized test).
+- **Safe old cover:** unchanged — still deleted after a successful record update.
+
+### 9.5 Anti-vacuous evidence (round 3)
+
+| Mutation | Target test(s) | Observed |
+|---|---|---|
+| Removed the old-path `SafeStoragePath` validation in `AturSampulEvent` | `test_atur_sampul_action_never_deletes_an_unsafe_persisted_old_cover_path`, `..._when_clearing` | 2 failures (sentinel deleted) |
+| Removed the same validation | `test_atur_sampul_action_ignores_any_unsafe_old_cover_path_shape` (parameterized, 5 cases) | 1 failure + 3 errors |
+| Temporarily allowed traversal in `PublishMediaToPortal` (naive prefix) | `test_publish_media_refuses_a_traversal_path_and_leaves_the_sentinel_file_untouched` | 1 failure on the **sentinel-absence side-effect assertion** (`Unable to find ... sentinel.jpg`), confirming the assertions now execute |
+
+All mutations reverted; focused suite returned green (48/48).
+
+### 9.6 Notes
+
+- `SafeStoragePath` is now used for both the new and the persisted-old cover paths, so no
+  code path deletes or persists an unvalidated storage path.
+- No new dependencies; no controllers/public UI/routes touched.
