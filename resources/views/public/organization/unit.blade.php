@@ -1,6 +1,15 @@
-<article class="psht-card border-l-4 border-l-psht-bright p-5" style="margin-inline-start: {{ min($depth, 5) * 1.25 }}rem" data-unit-name="{{ $unit->name }}">
+@php
+    // Indentation compounds: every nested level adds its own inline-start
+    // margin on top of the parent list's padding. Uncapped, a level-3+ card at
+    // a narrow viewport collapses to a few pixels and its heading overflows.
+    // The per-card contribution therefore stops growing after level 2 and the
+    // CSS below reduces padding/type for levels deeper than the first two, so
+    // deep hierarchies stay indented but readable. See resources/css/app.css.
+    $indentRem = min($depth, 2) * 1.25;
+@endphp
+<article class="psht-card min-w-0 border-l-4 border-l-psht-bright p-5" style="margin-inline-start: {{ $indentRem }}rem" data-unit-name="{{ $unit->name }}">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 class="text-lg font-semibold text-white">{{ $unit->name }}</h2>
+        <h2 class="text-lg font-semibold text-white break-words">{{ $unit->name }}</h2>
         <span class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">{{ $unit->type->value }}</span>
     </div>
     @if ($unit->supervisingBranch)

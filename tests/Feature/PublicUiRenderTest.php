@@ -8,6 +8,9 @@ use App\Models\Event;
 use App\Models\Gallery;
 use App\Models\Media;
 use App\Models\OrganizationUnit;
+use App\Models\Page;
+use App\Models\TrainingLocation;
+use App\OrganizationUnitType;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -144,7 +147,7 @@ class PublicUiRenderTest extends TestCase
 
     public function test_homepage_location_cards_link_to_the_detail_route(): void
     {
-        $location = \App\Models\TrainingLocation::factory()->create([
+        $location = TrainingLocation::factory()->create([
             'name' => 'Padepokan Beranda',
             'slug' => 'padepokan-beranda',
             'status' => PublicationStatus::Published,
@@ -399,7 +402,7 @@ class PublicUiRenderTest extends TestCase
     public function test_location_list_cards_link_to_detail_and_keep_map_hooks(): void
     {
         $unit = OrganizationUnit::factory()->create(['name' => 'Cabang Banjarmasin']);
-        $location = \App\Models\TrainingLocation::factory()->create([
+        $location = TrainingLocation::factory()->create([
             'slug' => 'padepokan-ui',
             'name' => 'Padepokan UI',
             'address' => 'Jl. Merdeka 1',
@@ -423,7 +426,7 @@ class PublicUiRenderTest extends TestCase
     public function test_location_detail_renders_breadcrumb_single_h1_and_only_non_empty_fields(): void
     {
         $unit = OrganizationUnit::factory()->create(['name' => 'Cabang Banjarbaru']);
-        $location = \App\Models\TrainingLocation::factory()->create([
+        $location = TrainingLocation::factory()->create([
             'slug' => 'padepokan-detail',
             'name' => 'Padepokan Detail',
             'address' => 'Jl. Contoh 10',
@@ -449,7 +452,7 @@ class PublicUiRenderTest extends TestCase
 
     public function test_location_detail_exposes_a_single_marker_map_with_attribution(): void
     {
-        $location = \App\Models\TrainingLocation::factory()->create([
+        $location = TrainingLocation::factory()->create([
             'slug' => 'padepokan-peta',
             'name' => 'Padepokan Peta',
             'latitude' => '-3.3186000',
@@ -474,16 +477,16 @@ class PublicUiRenderTest extends TestCase
     {
         $province = OrganizationUnit::factory()->create([
             'name' => 'Pengurus Provinsi Kalimantan Selatan',
-            'type' => \App\OrganizationUnitType::Provinsi,
+            'type' => OrganizationUnitType::Provinsi,
         ]);
         $branch = OrganizationUnit::factory()->create([
             'name' => 'Cabang Banjarmasin',
-            'type' => \App\OrganizationUnitType::Cabang,
+            'type' => OrganizationUnitType::Cabang,
             'parent_id' => $province->id,
         ]);
         OrganizationUnit::factory()->create([
             'name' => 'UKM Kampus',
-            'type' => \App\OrganizationUnitType::Ukm,
+            'type' => OrganizationUnitType::Ukm,
             'parent_id' => $province->id,
             'supervising_branch_id' => $branch->id,
         ]);
@@ -495,9 +498,65 @@ class PublicUiRenderTest extends TestCase
         $response->assertSee('data-unit-name', false);
     }
 
+    /**
+     * Deeply nested units must not be able to push the layout wider than the
+     * viewport. Indentation compounds at every level, so an uncapped level-3+
+     * card at narrow widths collapses and its name overflows horizontally. The
+     * fix caps the per-card indent and wraps the tree in a locally scrollable
+     * container (with a min-width floor) so no card clips its name and the page
+     * itself never scrolls sideways.
+     */
+    public function test_structure_nested_unit_name_cannot_overflow_the_viewport(): void
+    {
+        $province = OrganizationUnit::factory()->create([
+            'name' => 'Pengurus Provinsi Kalimantan Selatan',
+            'type' => OrganizationUnitType::Provinsi,
+        ]);
+        $branch = OrganizationUnit::factory()->create([
+            'name' => 'Cabang Banjarmasin',
+            'type' => OrganizationUnitType::Cabang,
+            'parent_id' => $province->id,
+        ]);
+        $ranting = OrganizationUnit::factory()->create([
+            'name' => 'Ranting Banjarmasin Utara',
+            'type' => OrganizationUnitType::Ranting,
+            'parent_id' => $branch->id,
+        ]);
+        OrganizationUnit::factory()->create([
+            'name' => 'Rayon ULM',
+            'type' => OrganizationUnitType::Rayon,
+            'parent_id' => $ranting->id,
+        ]);
+
+        $html = $this->get(route('public.organization.index'))->assertOk()->getContent();
+
+        // Depth 1 and depth 2 render 1.25rem and 2.5rem of inline-start margin;
+        // depth 3+ is capped at 2.5rem so cumulative indentation stops growing.
+        $this->assertStringContainsString('margin-inline-start: 1.25rem', $html);
+        $this->assertStringContainsString('margin-inline-start: 2.5rem', $html);
+        $this->assertStringNotContainsString('margin-inline-start: 3.75rem', $html);
+        $this->assertStringNotContainsString('margin-inline-start: 5rem', $html);
+        // The tree is wrapped in a locally scrollable container so deep
+        // indentation cannot widen the page.
+        $this->assertStringContainsString('organization-tree-scroll', $html);
+        // The unit card must be allowed to shrink so the indentation cannot
+        // force the recursion wider than its container.
+        $this->assertMatchesRegularExpression(
+            '/class="psht-card[^"]*min-w-0/',
+            $html,
+            'Nested unit cards must declare min-w-0 so deep indentation cannot overflow.',
+        );
+        // The heading must be allowed to wrap inside its flex row.
+        $this->assertMatchesRegularExpression(
+            '/<h2 class="text-lg[^"]*break-words[^"]*">/',
+            $html,
+            'Nested unit headings must break long names instead of overflowing.',
+        );
+    }
+
     public function test_profile_page_uses_editorial_width_and_no_invented_sections(): void
     {
-        $page = \App\Models\Page::factory()->create([
+        $page = Page::factory()->create([
             'slug' => 'profil-ui',
             'title' => 'Profil UI',
             'body' => 'Naskah profil resmi yang telah diterbitkan.',

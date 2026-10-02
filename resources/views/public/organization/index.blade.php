@@ -15,11 +15,18 @@
             @if ($units->isEmpty())
                 <p class="psht-card border-dashed p-6 text-stone-400">Struktur belum diterbitkan.</p>
             @else
-                <ol class="organization-tree space-y-4">
-                    @foreach ($units as $unit)
-                        <li>@include('public.organization.unit', ['unit' => $unit, 'depth' => 0])</li>
-                    @endforeach
-                </ol>
+                {{-- Deep hierarchies can need more width than a 320px viewport can
+                     give once indentation compounds; the tree scrolls inside this
+                     wrapper instead of widening the page. The wrapper is
+                     keyboard-focusable so the scroll region stays reachable
+                     without a pointer. --}}
+                <div class="organization-tree-scroll" tabindex="0" aria-label="Struktur organisasi">
+                    <ol class="organization-tree space-y-4">
+                        @foreach ($units as $unit)
+                            <li>@include('public.organization.unit', ['unit' => $unit, 'depth' => 0])</li>
+                        @endforeach
+                    </ol>
+                </div>
             @endif
         </div>
     </section>

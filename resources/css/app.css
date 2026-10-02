@@ -129,6 +129,59 @@
     padding-left: 1rem;
 }
 
+/* Deep hierarchies keep their guide line but reduce the extra indent so the
+   innermost card stays wide enough to render its name without overflowing.
+   The indent compounds at every level, so levels below the first two trade
+   some indentation and card padding for readable width. */
+.tree-children .tree-children {
+    margin-left: 0.5rem;
+    padding-left: 0.5rem;
+}
+
+.tree-children .tree-children .psht-card {
+    padding: 0.75rem;
+}
+
+.tree-children .tree-children .psht-card h2 {
+    font-size: 1rem;
+    line-height: 1.4;
+}
+
+/* Third and deeper levels: the guide line is kept but the indent stops
+   compounding so the card keeps enough width at 320px viewports. */
+.tree-children .tree-children .tree-children {
+    margin-left: 0.25rem;
+    padding-left: 0.25rem;
+}
+
+.tree-children .tree-children .tree-children .psht-card {
+    padding: 0.5rem 0.625rem;
+}
+
+.tree-children .tree-children .tree-children .psht-card h2 {
+    font-size: 0.9375rem;
+}
+
+/* Beyond the third level the indent would only repeat the same guide line
+   while consuming the card's width; keep the line, drop the extra indent. */
+.tree-children .tree-children .tree-children .tree-children {
+    margin-left: 0;
+    padding-left: 0;
+}
+
+/* Safety net for unusually long unit names or deep hierarchies on narrow
+   (320px) viewports: the tree scrolls inside its own column instead of
+   pushing the document wider than the screen. The min-width gives the
+   compounded indentation room so no card has to clip its name. */
+.organization-tree-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+}
+
+.organization-tree-scroll .organization-tree {
+    min-width: 40rem;
+}
+
 /* ------------------------------------------------------------------ */
 /* Training location maps                                              */
 /* ------------------------------------------------------------------ */
