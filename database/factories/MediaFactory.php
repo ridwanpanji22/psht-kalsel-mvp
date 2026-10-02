@@ -25,6 +25,7 @@ class MediaFactory extends Factory
             'size' => 1024,
             'alt_text' => fake()->sentence(),
             'is_public' => false,
+            'sort_order' => 0,
         ];
     }
 }

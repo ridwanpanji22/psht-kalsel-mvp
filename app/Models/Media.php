@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'size',
     'alt_text',
     'is_public',
+    'sort_order',
 ])]
 class Media extends Model
 {
@@ -38,6 +39,7 @@ class Media extends Model
         return [
             'size' => 'integer',
             'is_public' => 'boolean',
+            'sort_order' => 'integer',
         ];
     }
 }

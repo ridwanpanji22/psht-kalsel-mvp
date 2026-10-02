@@ -15,6 +15,8 @@ use Illuminate\Database\Eloquent\Model;
     'starts_at',
     'ends_at',
     'venue',
+    'cover_path',
+    'cover_alt_text',
     'status',
     'submitted_by_id',
     'published_by_id',
@@ -33,6 +35,8 @@ class Event extends Model
             ...$this->publicationCasts(),
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
+            'cover_path' => 'string',
+            'cover_alt_text' => 'string',
         ];
     }
 }

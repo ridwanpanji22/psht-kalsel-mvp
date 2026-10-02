@@ -24,6 +24,8 @@ class EventFactory extends Factory
             'starts_at' => '2026-10-01 09:00:00',
             'ends_at' => null,
             'venue' => null,
+            'cover_path' => null,
+            'cover_alt_text' => null,
             'status' => PublicationStatus::Draft,
             'submitted_by_id' => null,
             'published_by_id' => null,

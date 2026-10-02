@@ -21,6 +21,7 @@ class GalleryFactory extends Factory
             'slug' => fake()->unique()->slug(),
             'title' => fake()->sentence(3),
             'description' => null,
+            'category' => null,
             'status' => PublicationStatus::Draft,
             'submitted_by_id' => null,
             'published_by_id' => null,

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\GalleryCategory;
 use Database\Factories\GalleryFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'slug',
     'title',
     'description',
+    'category',
     'status',
     'submitted_by_id',
     'published_by_id',
@@ -27,11 +29,16 @@ class Gallery extends Model
 
     protected function casts(): array
     {
-        return $this->publicationCasts();
+        return [
+            ...$this->publicationCasts(),
+            'category' => GalleryCategory::class,
+        ];
     }
 
     public function media(): HasMany
     {
-        return $this->hasMany(Media::class);
+        return $this->hasMany(Media::class)
+            ->orderBy('sort_order')
+            ->orderBy('id');
     }
 }
