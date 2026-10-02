@@ -141,13 +141,13 @@ Per `docs/superpowers/specs/...-design.md` §3.2 and plan Global Constraints, th
 enum is enforced at the **application write boundary**, not by a DB check constraint, so the
 same migration is valid on MySQL 8 and SQLite.
 
-Implementation detail discovered during verification (documented in code comments):
-`Filament\Forms\Components\Select` resolves option labels via `$options[$state]` for flat
-maps. PHP silently coerces numeric-string keys to integers, so a pre-built label map with
-one-word values (e.g. `['latihan' => ...]`) can never resolve a string state and **silently
-disables** Filament's derived `in:` rule. Passing the backed enum class-string
-(`->options(GalleryCategory::class)`) keeps Filament on its enum-aware path and correctly
-rejects out-of-allowlist values. Rejected alternatives and evidence are recorded in §7.
+Implementation detail: `Filament\Forms\Components\Select` is configured with the backed enum
+class-string (`->options(GalleryCategory::class)`) rather than a hand-built value→label map.
+This keeps Filament on its enum-aware allowlist/validation path, so the allowed values are
+enforced by the form's own rules at the real write boundary, and it keeps a single source of
+truth for allowed values and labels (the `GalleryCategory` enum). The explicit
+`Rule::enum(GalleryCategory::class)` rule mirrors that allowlist for non-Filament write paths.
+Rejected alternatives and evidence are recorded in §7.
 
 ---
 
@@ -169,11 +169,12 @@ rejects out-of-allowlist values. Rejected alternatives and evidence are recorded
 
 ## 7. Concerns / deviations
 
-1. **Filament Select + non-numeric enum values (resolved, but notable).** A value-keyed
-   label map is unsafe for Filament flat options. The fix (enum class-string) is in place and
-   tested. Task 2's Gallery Media relation manager and any future category filters should
-   reuse `App\Filament\Resources\Galleries\Schemas\CategorySchema::field()` rather than
-   rebuilding an options array, to avoid re-introducing the silent-validation-bypass trap.
+1. **Filament Select enum configuration (resolved, but notable).** The category field uses
+   Filament's enum-aware path (enum class-string), which is the idiomatic configuration and
+   keeps one source of truth for allowed values/labels. Task 2's Gallery Media relation
+   manager and any future category filters should reuse
+   `App\Filament\Resources\Galleries\Schemas\CategorySchema::field()` rather than rebuilding
+   an options/label array, so the allowlist and labels cannot drift.
 2. **`media.sort_order` is `notnull` with default 0 (by design).** The brief specifies
    "unsigned default `0`"; SQLite reports `notnull=1` for a defaulted non-nullable column.
    Legacy rows receive `0` and the `id` tie-break preserves deterministic ordering. The
@@ -182,9 +183,9 @@ rejects out-of-allowlist values. Rejected alternatives and evidence are recorded
    ("Filament edit surfaces use these fields") is only satisfied for the Gallery category
    field within Task 1's minimal boundary; Event cover and Gallery media form surfaces are
    Task 2 by the plan's own split, so they were intentionally not built here.
-4. **`GalleryCategory::options()` remains** as the single label-map source for non-Filament
-   consumers (e.g. Blade filters in Task 3). It is not used as a Filament option array to
-   avoid concern #1.
+4. **`GalleryCategory::options()` remains** as the shared value→label map for non-Filament
+   consumers (e.g. Blade filters in Task 3); it is the same enum-derived allowlist used by the
+   Filament field, so there is no divergent second list.
 5. **Validator-parity tests** (`test_write_boundary_*`) mirror the shared `Rule::enum`
    rule rather than routing through a Task-1 application action, since no Task-1 write
    action exists yet; the real Livewire Filament tests provide the end-to-end coverage.
@@ -202,3 +203,22 @@ c4c1b5a  feat(public): add backward-compatible publication schema and contracts
 This report is committed as part of the task commit (the SHA above is the final HEAD
 after this report was folded in; a report cannot embed its own not-yet-existing hash
 exactly, so the commit subject is the stable identifier).
+
+---
+
+## 9. Fix round 1 — docs-only correction
+
+**Reviewer finding (verbatim):** report lines 146–149 claim PHP coerces alphabetic keys
+`latihan`, `kegiatan`, `pembinaan` to integers; PHP preserves these nonnumeric string keys.
+
+**Verdict:** accepted. The claim was inaccurate. `latihan`, `kegiatan`, `pembinaan` are
+non-numeric strings, and PHP preserves non-numeric string keys as strings (only
+canonical numeric strings such as `"0"`–`"3"` are coerced to integers). The original text
+conflated that with the earlier numeric-key observation, which is unrelated to these
+alphabetic enum values.
+
+**Correction:** §5 and §7 now state the actual rationale for using
+`->options(GalleryCategory::class)`: it keeps Filament on its enum-aware
+allowlist/validation path and maintains a single source of truth for allowed values and
+labels. The irrelevant key-coercion claim was removed. No code was changed; no tests were
+rerun (code is byte-identical to the tested commit).
