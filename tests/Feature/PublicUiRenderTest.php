@@ -499,12 +499,9 @@ class PublicUiRenderTest extends TestCase
     }
 
     /**
-     * Deeply nested units must not be able to push the layout wider than the
-     * viewport. Indentation compounds at every level, so an uncapped level-3+
-     * card at narrow widths collapses and its name overflows horizontally. The
-     * fix caps the per-card indent and wraps the tree in a locally scrollable
-     * container (with a min-width floor) so no card clips its name and the page
-     * itself never scrolls sideways.
+     * Deeply nested units must not widen the page or collapse their names.
+     * The local scroll container bounds page overflow; fixed card width
+     * preserves readable content at every recursive depth.
      */
     public function test_structure_nested_unit_name_cannot_overflow_the_viewport(): void
     {
@@ -539,19 +536,37 @@ class PublicUiRenderTest extends TestCase
         // The tree is wrapped in a locally scrollable container so deep
         // indentation cannot widen the page.
         $this->assertStringContainsString('organization-tree-scroll', $html);
-        // The unit card must be allowed to shrink so the indentation cannot
-        // force the recursion wider than its container.
-        $this->assertMatchesRegularExpression(
-            '/class="psht-card[^"]*min-w-0/',
-            $html,
-            'Nested unit cards must declare min-w-0 so deep indentation cannot overflow.',
-        );
+        // Valid hierarchy cards fill their parent; only over-depth data gets local-scroll floor.
+        $this->assertStringContainsString('organization-unit-card', $html);
+        $this->assertStringContainsString('style="width: 100%; margin-inline-start: 2.5rem"', $html);
+        $this->assertStringNotContainsString('min-width: 40rem', $html);
         // The heading must be allowed to wrap inside its flex row.
         $this->assertMatchesRegularExpression(
             '/<h2 class="text-lg[^"]*break-words[^"]*">/',
             $html,
             'Nested unit headings must break long names instead of overflowing.',
         );
+    }
+
+    public function test_very_deep_structure_keeps_each_unit_card_wide_enough_to_read(): void
+    {
+        $parent = OrganizationUnit::factory()->create([
+            'name' => 'Pengurus Provinsi',
+            'type' => OrganizationUnitType::Provinsi,
+        ]);
+
+        for ($depth = 1; $depth <= 12; $depth++) {
+            $parent = OrganizationUnit::factory()->create([
+                'name' => "Unit tingkat {$depth}",
+                'type' => $depth === 1 ? OrganizationUnitType::Cabang : OrganizationUnitType::Ranting,
+                'parent_id' => $parent->id,
+            ]);
+        }
+
+        $html = $this->get(route('public.organization.index'))->assertOk()->getContent();
+
+        $this->assertSame(9, substr_count($html, 'min-width: 40rem;'));
+        $this->assertSame(13, substr_count($html, 'style="width: 100%;'));
     }
 
     public function test_profile_page_uses_editorial_width_and_no_invented_sections(): void

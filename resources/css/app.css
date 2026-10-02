@@ -169,17 +169,11 @@
     padding-left: 0;
 }
 
-/* Safety net for unusually long unit names or deep hierarchies on narrow
-   (320px) viewports: the tree scrolls inside its own column instead of
-   pushing the document wider than the screen. The min-width gives the
-   compounded indentation room so no card has to clip its name. */
+/* Cards deeper than the formal hierarchy keep a readable fixed width; this
+   wrapper confines the resulting tree inside the viewport column. */
 .organization-tree-scroll {
     overflow-x: auto;
     overscroll-behavior-x: contain;
-}
-
-.organization-tree-scroll .organization-tree {
-    min-width: 40rem;
 }
 
 /* ------------------------------------------------------------------ */

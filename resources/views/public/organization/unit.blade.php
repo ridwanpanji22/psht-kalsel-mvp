@@ -7,7 +7,7 @@
     // deep hierarchies stay indented but readable. See resources/css/app.css.
     $indentRem = min($depth, 2) * 1.25;
 @endphp
-<article class="psht-card min-w-0 border-l-4 border-l-psht-bright p-5" style="margin-inline-start: {{ $indentRem }}rem" data-unit-name="{{ $unit->name }}">
+<article class="psht-card organization-unit-card border-l-4 border-l-psht-bright p-5" style="width: 100%; {{ $depth > 3 ? 'min-width: 40rem; ' : '' }}margin-inline-start: {{ $indentRem }}rem" data-unit-name="{{ $unit->name }}">
     <div class="flex flex-wrap items-baseline justify-between gap-2">
         <h2 class="text-lg font-semibold text-white break-words">{{ $unit->name }}</h2>
         <span class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">{{ $unit->type->value }}</span>
