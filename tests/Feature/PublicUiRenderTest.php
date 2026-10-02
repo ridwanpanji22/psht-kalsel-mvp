@@ -339,6 +339,41 @@ class PublicUiRenderTest extends TestCase
         $response->assertSee('aria-label="Tutup foto"', false);
     }
 
+    public function test_gallery_dialog_places_close_and_navigation_in_separate_rows(): void
+    {
+        Storage::fake('public');
+        $gallery = $this->publishedGallery(['title' => 'Album Baris Dialog']);
+        $this->publicMedia($gallery, ['alt_text' => 'Foto baris dialog']);
+
+        $html = $this->get(route('public.galleries.index'))->assertOk()->getContent();
+
+        // The close button and the prev/next navigation live in two distinct
+        // stacked wrappers (header row + navigation row) rather than two
+        // absolutely positioned blocks sharing one top row, which is what
+        // caused them to collide on a 320px viewport.
+        $this->assertMatchesRegularExpression(
+            '/data-lightbox-close/s',
+            $html,
+            'Dialog must expose a close control.',
+        );
+        $this->assertMatchesRegularExpression(
+            '/class="gallery-dialog__header".*?data-lightbox-close.*?<\/div>\s*<img/s',
+            $html,
+            'Close control must sit in its own header row before the image.',
+        );
+        $this->assertMatchesRegularExpression(
+            '/class="gallery-dialog__controls".*?data-lightbox-prev.*?data-lightbox-next/s',
+            $html,
+            'Prev/next controls must share a dedicated navigation row.',
+        );
+        // The two wrappers must be siblings (navigation is not nested inside
+        // the header), so CSS can stack them instead of overlapping them.
+        $header = str($html)->after('class="gallery-dialog__header"')->before('</div>')->toString();
+        $this->assertStringContainsString('data-lightbox-close', $header, 'Header row must contain the close control.');
+        $this->assertStringNotContainsString('data-lightbox-prev', $header, 'Header row must not contain the navigation controls.');
+        $this->assertStringNotContainsString('data-lightbox-next', $header, 'Header row must not contain the navigation controls.');
+    }
+
     public function test_gallery_pagination_retains_the_category_filter(): void
     {
         Storage::fake('public');

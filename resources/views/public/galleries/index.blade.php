@@ -72,11 +72,16 @@
 
         <dialog id="gallery-dialog" class="gallery-dialog" aria-label="Tampilan foto galeri">
             <form method="dialog" class="gallery-dialog__frame">
+                {{-- Header row and navigation row are separate stacked siblings so
+                     the close button and the prev/next controls never share one
+                     absolutely positioned top row (which collided at 320px). --}}
+                <div class="gallery-dialog__header">
+                    <button type="submit" class="gallery-dialog__close" data-lightbox-close aria-label="Tutup foto">Tutup</button>
+                </div>
                 <div class="gallery-dialog__controls">
                     <button type="button" class="psht-control" data-lightbox-prev aria-label="Foto sebelumnya">Sebelumnya</button>
                     <button type="button" class="psht-control" data-lightbox-next aria-label="Foto berikutnya">Berikutnya</button>
                 </div>
-                <button type="submit" class="gallery-dialog__close" data-lightbox-close aria-label="Tutup foto">Tutup</button>
                 <img data-gallery-dialog-image alt="">
                 <p data-gallery-dialog-caption></p>
                 <noscript><p>Tampilan foto memerlukan JavaScript. Semua foto tetap tersedia pada daftar album di atas.</p></noscript>
