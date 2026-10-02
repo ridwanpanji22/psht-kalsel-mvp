@@ -200,3 +200,89 @@ All mutations reverted; the focused suite returned to green (23/23).
    unchanged from prior tasks.
 7. **Not run (per brief):** full `php artisan test`, `npm run build`, and whole-repo Pint.
    Focused Task-2 + adjacent auth/scope suites (54 tests) were run and pass.
+
+---
+
+## 7. Fix round 1 — reviewer findings resolved
+
+**Commit:** `c33b11f` — `fix(public): harden Filament media cover and upload lifecycle`
+(base: `a4e5252`). All six findings below were resolved with TDD (RED → GREEN) and each
+guard was proven non-vacuous by mutation.
+
+### 7.1 Findings and fixes
+
+| # | Severity | Finding | Fix |
+|---|---|---|---|
+| 1 | Critical | Path tampering: client could submit an existing local path (MIME/size bypass, private-file publish); event `cover_path` same risk | Added `->preventFilePathTampering(true, allowFilePathUsing)` + an explicit prefix `->rules([...])` allowlist to **both** FileUpload fields, and server-side prefix checks in the media create callback (`private/gallery-media/`). `PublishMediaToPortal` now rejects any path outside `private/gallery-media/`; `EditEvent` cover is validated as `private/event-covers/`. |
+| 2 | Important | Hidden media (`is_public=false`, `disk=public`) could be republished, copying/deleting the public source | `PublishMediaToPortal` now requires `disk === 'local'` and a `private/gallery-media/` prefix; the `Terbitkan media` action visibility mirrors this. After `Hapus dari portal` no republish is possible, and the `/storage` file remains. |
+| 3 | Important + Minor | Upload metadata `rescue(..., report:false)` returned null despite NOT NULL columns, failing row creation and leaving an orphan | Mime/size are now derived from the stored file and validated against the allowed MIME list; the new `Media` row is inserted inside try/catch that deletes the staged local file on failure (and on metadata failure). |
+| 4 | Important | DB-failure compensation `$publicDisk->delete()` result ignored with `throw=false` | Compensation now checks the boolean/`exists()` after delete and logs `Log::error(...)` on failure while preserving and rethrowing the original DB exception. |
+| 5 | Minor | Initial non-cover save before the cover lifecycle could leak a newly staged cover | `EditEvent::handleRecordUpdate` wraps the initial `fill()->save()` in try/catch; on failure it deletes the newly staged cover (only when it differs from the current one) and preserves the previous cover. |
+| 6 | Minor | Post-commit local delete result ignored | The post-commit delete now verifies the file is gone (or logs a precise `Log::error`) without ever reverting the public DB state or removing the public file. |
+
+### 7.2 RED (before fixes)
+
+Command: `vendor/bin/phpunit tests/Feature/FilamentPublicationWorkflowTest.php`
+
+```
+tests 33 failures 5 errors 2
+```
+
+The 11 new tests were RED: tampering tests errored (no prefix guard), the
+disk/prefix/MIME/republish tests failed (`Expected ... to be refused`), and
+`test_media_upload_deletes_the_staged_file_when_the_row_creation_fails` failed on
+orphaned staged files.
+
+### 7.3 GREEN (after fixes)
+
+```
+{"tool":"phpunit","result":"passed","tests":34,"passed":34,"assertions":207}
+```
+
+Focused suite: **34 tests, 34 passed, 207 assertions, 0 failures, 0 errors.**
+
+Adjacent suites (schema, private media, publication workflow, Filament auth, unit
+isolation, unit-scope authorization, membership scope):
+
+```
+{"tool":"phpunit","result":"passed","tests":65,"passed":65,"assertions":311}
+```
+
+Pint: `{"tool":"pint","result":"fixed"}` (formatting only) then re-ran green.
+
+### 7.4 Cleanup-failure behavior
+
+- **Copy failure, compensation delete also fails:** original copy exception is rethrown;
+  `Log::error('Berkas publik masih ada setelah kegagalan salin.')` is emitted; the local
+  file is untouched and the record stays `disk=local, is_public=false`.
+- **DB update failure, compensation delete also fails:** original DB exception is rethrown
+  (never swallowed); `Log::error('Gagal membersihkan berkas publik setelah kegagalan basis
+  data.')` is emitted; the local file remains.
+- **Post-commit local delete fails:** public DB/file state stands (never reverted);
+  `Log::error('Berkas privat media masih ada setelah penerbitan.')` is emitted.
+- All three paths verified with a thin `FilesystemAdapter` wrapper whose `delete()`/`put()`
+  results are controlled, and with `Log::shouldReceive('error')` message-matched
+  expectations.
+
+### 7.5 Anti-vacuous evidence (fix round)
+
+| Removed guard | Failing test(s) |
+|---|---|
+| Service disk/prefix guard | `test_publish_media_refuses_a_media_record_backed_by_a_non_local_disk`, `test_publish_media_refuses_a_local_path_outside_the_gallery_media_prefix` (2/2) |
+| Service content-MIME guard | `test_publish_media_refuses_a_local_file_whose_content_mime_is_not_allowed` (1/1) |
+| Event cover tamper rule + `preventFilePathTampering` | `test_event_cover_upload_refuses_a_tampered_client_supplied_local_path` (1/1) |
+| Gallery upload staged-file cleanup on row-create failure | `test_media_upload_deletes_the_staged_file_when_the_row_creation_fails` (1/1) |
+| Event staged-cover cleanup on initial-save failure | `test_event_page_deletes_a_newly_staged_cover_when_the_record_update_fails` (1/1) |
+| All three cleanup-failure `Log::error` calls | `test_publish_media_reports_a_failed_local_cleanup_...`, `..._failed_compensation_delete_...`, `..._failed_copy_compensation_...` (3/3 errors) |
+
+### 7.6 Notes
+
+- The disk/prefix tests would previously have passed for the wrong reason (the service
+  hardcoded `local` as the source, so a public-backed record failed with "file not found");
+  the non-local test now mirrors the file onto the local disk so **only** the disk guard
+  can refuse it, making the assertion meaningful.
+- The staged-file cleanup and event cover-lifecycle tests that need a *replacement* file
+  invoke the real code path directly (`handleRecordUpdate` / `AturSampulEvent`) because the
+  Livewire `FileUpload` harness cannot replace an existing keyed stored value (see §6.1).
+- `mime_type`/`size` remain NOT NULL; metadata is now validated before insert and the
+  staged file is removed if the probe or insert fails.

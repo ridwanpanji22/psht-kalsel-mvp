@@ -15,8 +15,11 @@ use App\Models\Media;
 use App\Models\OrganizationUnit;
 use App\Models\UnitAssignment;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
@@ -576,7 +579,7 @@ class FilamentPublicationWorkflowTest extends TestCase
             'alt_text' => 'Peserta latihan',
             'is_public' => true,
         ]);
-        Storage::disk('public')->put('public/gallery-media/foto.jpg', 'image-bytes');
+        Storage::disk('public')->put('public/gallery-media/foto.jpg', $this->validJpegBytes());
 
         $this->actingAs($operator);
 
@@ -630,6 +633,450 @@ class FilamentPublicationWorkflowTest extends TestCase
             ->mountTableAction('create')
             ->assertFormFieldDoesNotExist('disk')
             ->assertFormFieldDoesNotExist('is_public');
+    }
+
+    // ---------------------------------------------------------------------
+    // Fix round 1 — path tampering, republish, cleanup, metadata
+    // ---------------------------------------------------------------------
+
+    public function test_event_cover_upload_refuses_a_tampered_client_supplied_local_path(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $event = Event::factory()->create(['organization_unit_id' => $unit->id]);
+        Storage::disk('local')->put('private/gallery-media/secret.jpg', 'not-an-event-cover');
+
+        $this->actingAs($operator);
+
+        Livewire::test(EditEvent::class, ['record' => $event->getRouteKey()])
+            ->fillForm(['cover_path' => ['private/gallery-media/secret.jpg'], 'cover_alt_text' => 'X'])
+            ->call('save')
+            ->assertHasFormErrors(['cover_path']);
+
+        $this->assertNull($event->refresh()->cover_path);
+    }
+
+    public function test_media_upload_refuses_a_tampered_client_supplied_local_path(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = Gallery::factory()->create(['organization_unit_id' => $unit->id]);
+        Storage::disk('local')->put('private/event-covers/secret.jpg', 'not-a-gallery-upload');
+
+        $this->actingAs($operator);
+
+        Livewire::test(GalleryMediaRelationManager::class, [
+            'ownerRecord' => $gallery,
+            'pageClass' => EditGallery::class,
+        ])
+            ->callTableAction('create', data: [
+                'file' => ['private/event-covers/secret.jpg'],
+                'alt_text' => 'X',
+                'sort_order' => 0,
+            ])
+            ->assertHasTableActionErrors(['file']);
+
+        $this->assertSame(0, Media::query()->count());
+    }
+
+    public function test_publish_media_refuses_a_media_record_backed_by_a_non_local_disk(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'public',
+            'path' => 'public/gallery-media/sneaky.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => false,
+        ]);
+        Storage::disk('public')->put('public/gallery-media/sneaky.jpg', $this->validJpegBytes());
+        // Mirror the same path on the local disk so the record cannot be
+        // rejected merely by a missing source file; only the disk guard can
+        // refuse this publish.
+        Storage::disk('local')->put('public/gallery-media/sneaky.jpg', $this->validJpegBytes());
+
+        $this->actingAs($operator);
+
+        try {
+            app(PublishMediaToPortal::class)->publish($operator, $media);
+            $this->fail('Expected a non-local media record to be refused.');
+        } catch (ValidationException) {
+            // expected
+        }
+
+        $media->refresh();
+        $this->assertFalse($media->is_public);
+        $this->assertSame('public', $media->disk);
+        $this->assertSame('public/gallery-media/sneaky.jpg', $media->path);
+        Storage::disk('public')->assertExists('public/gallery-media/sneaky.jpg');
+    }
+
+    public function test_publish_media_refuses_a_local_path_outside_the_gallery_media_prefix(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'local',
+            'path' => 'private/event-covers/looks-like-a-cover.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => false,
+        ]);
+        Storage::disk('local')->put('private/event-covers/looks-like-a-cover.jpg', 'cover');
+
+        $this->actingAs($operator);
+
+        $this->expectException(ValidationException::class);
+        app(PublishMediaToPortal::class)->publish($operator, $media);
+    }
+
+    public function test_publish_media_refuses_a_local_file_whose_content_mime_is_not_allowed(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'local',
+            'path' => 'private/gallery-media/fake.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => false,
+        ]);
+        Storage::disk('local')->put('private/gallery-media/fake.jpg', '<?php echo "not an image";');
+
+        $this->actingAs($operator);
+
+        try {
+            app(PublishMediaToPortal::class)->publish($operator, $media);
+            $this->fail('Expected disallowed content MIME to be refused.');
+        } catch (ValidationException) {
+            // expected
+        }
+
+        $media->refresh();
+        $this->assertFalse($media->is_public);
+        $this->assertSame('local', $media->disk);
+        Storage::disk('public')->assertDirectoryEmpty('/');
+        Storage::disk('local')->assertExists('private/gallery-media/fake.jpg');
+    }
+
+    public function test_media_hidden_from_portal_cannot_be_republished_or_reach_the_public_source_file(): void
+    {
+        Storage::fake('public');
+        Storage::fake('local');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'public',
+            'path' => 'public/gallery-media/foto.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => true,
+        ]);
+        Storage::disk('public')->put('public/gallery-media/foto.jpg', $this->validJpegBytes());
+
+        $this->actingAs($operator);
+
+        Livewire::test(GalleryMediaRelationManager::class, [
+            'ownerRecord' => $gallery,
+            'pageClass' => EditGallery::class,
+        ])->callTableAction('hapusDariPortal', $media);
+
+        $this->assertFalse($media->refresh()->is_public);
+
+        Livewire::test(GalleryMediaRelationManager::class, [
+            'ownerRecord' => $gallery,
+            'pageClass' => EditGallery::class,
+        ])->assertTableActionHidden('publishToPortal', $media);
+
+        try {
+            app(PublishMediaToPortal::class)->publish($operator, $media);
+            $this->fail('A hidden public-backed media record must not be republishable.');
+        } catch (ValidationException) {
+            // expected
+        }
+
+        $media->refresh();
+        $this->assertFalse($media->is_public);
+        $this->assertSame('public', $media->disk);
+        $this->assertSame('public/gallery-media/foto.jpg', $media->path);
+        Storage::disk('public')->assertExists('public/gallery-media/foto.jpg');
+    }
+
+    public function test_media_upload_deletes_the_staged_file_when_the_row_creation_fails(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = Gallery::factory()->create(['organization_unit_id' => $unit->id]);
+
+        Media::creating(function (): void {
+            throw new \RuntimeException('row create failed');
+        });
+
+        $this->actingAs($operator);
+
+        try {
+            Livewire::test(GalleryMediaRelationManager::class, [
+                'ownerRecord' => $gallery,
+                'pageClass' => EditGallery::class,
+            ])->callTableAction('create', data: [
+                'file' => UploadedFile::fake()->image('foto.jpg', 800, 600),
+                'alt_text' => 'Peserta latihan',
+                'sort_order' => 0,
+            ]);
+        } catch (\RuntimeException) {
+            // Livewire surfaces the thrown exception out of the test harness.
+        } finally {
+            Media::flushEventListeners();
+        }
+
+        $this->assertSame(0, Media::query()->count());
+        $this->assertSame([], Storage::disk('local')->allFiles());
+    }
+
+    public function test_event_page_deletes_a_newly_staged_cover_when_the_record_update_fails(): void
+    {
+        Storage::fake('local');
+        $unit = OrganizationUnit::factory()->create();
+        $event = Event::factory()->create([
+            'organization_unit_id' => $unit->id,
+            'cover_path' => 'private/event-covers/old.jpg',
+            'cover_alt_text' => 'Lama',
+        ]);
+        Storage::disk('local')->put('private/event-covers/old.jpg', 'old-cover');
+        Storage::disk('local')->put('private/event-covers/new.jpg', 'new-cover');
+
+        Event::updating(function (): void {
+            throw new \RuntimeException('record update failed');
+        });
+
+        try {
+            (new class extends EditEvent
+            {
+                public function saveRecord(Model $record, array $data): Model
+                {
+                    return $this->handleRecordUpdate($record, $data);
+                }
+            })->saveRecord($event, [
+                'title' => 'Judul baru',
+                'cover_path' => 'private/event-covers/new.jpg',
+                'cover_alt_text' => 'Baru',
+            ]);
+            $this->fail('Expected the initial record save to fail.');
+        } catch (\RuntimeException) {
+            // expected
+        } finally {
+            Event::flushEventListeners();
+        }
+
+        $event->refresh();
+        $this->assertSame('private/event-covers/old.jpg', $event->cover_path);
+        Storage::disk('local')->assertExists('private/event-covers/old.jpg');
+        Storage::disk('local')->assertMissing('private/event-covers/new.jpg');
+    }
+
+    public function test_publish_media_reports_a_failed_local_cleanup_after_commit_without_reverting_public_state(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'local',
+            'path' => 'private/gallery-media/foto.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => false,
+        ]);
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', 'image-bytes');
+
+        // Simulate a post-commit cleanup failure: the local delete reports
+        // failure and the file remains, but the public state must stand.
+        $this->failLocalDiskDeletes(fn (): bool => false);
+
+        Log::shouldReceive('error')->atLeast()->once()->withArgs(
+            fn (string $message): bool => str_contains($message, 'Berkas privat media masih ada'),
+        );
+
+        $this->actingAs($operator);
+
+        $result = app(PublishMediaToPortal::class)->publish($operator, $media);
+
+        $this->assertTrue($result->is_public);
+        $this->assertSame('public', $result->disk);
+        Storage::disk('public')->assertExists($result->path);
+    }
+
+    public function test_publish_media_reports_a_failed_compensation_delete_without_swallowing_the_db_exception(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'local',
+            'path' => 'private/gallery-media/foto.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => false,
+        ]);
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', 'image-bytes');
+
+        // Compensation delete also fails; the original DB exception must still win.
+        $this->failPublicDiskDeletes(fn (): bool => false);
+
+        // Compensation delete reported failure: the orphaned public file
+        // remains, and this must be logged loudly. The DB exception is
+        // preserved and the private file is untouched.
+        Log::shouldReceive('error')->atLeast()->once()->withArgs(
+            fn (string $message): bool => str_contains($message, 'Gagal membersihkan berkas publik setelah kegagalan basis data'),
+        );
+
+        Media::updating(function (): void {
+            throw new \RuntimeException('database down');
+        });
+
+        try {
+            app(PublishMediaToPortal::class)->publish($operator, $media);
+            $this->fail('Expected the DB exception to bubble up.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('database down', $exception->getMessage());
+        } finally {
+            Media::flushEventListeners();
+        }
+
+        $media->refresh();
+        $this->assertFalse($media->is_public);
+        $this->assertSame('local', $media->disk);
+        Storage::disk('local')->assertExists('private/gallery-media/foto.jpg');
+        $this->assertCount(1, Storage::disk('public')->allFiles());
+    }
+
+    public function test_publish_media_reports_a_failed_copy_compensation_and_keeps_the_local_file(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+        $unit = OrganizationUnit::factory()->create();
+        $operator = $this->operator($unit);
+        $gallery = $this->publishedGallery($unit);
+        $media = Media::factory()->create([
+            'gallery_id' => $gallery->id,
+            'organization_unit_id' => $unit->id,
+            'disk' => 'local',
+            'path' => 'private/gallery-media/foto.jpg',
+            'alt_text' => 'Peserta latihan',
+            'is_public' => false,
+        ]);
+        Storage::disk('local')->put('private/gallery-media/foto.jpg', $this->validJpegBytes());
+
+        // Copy fails and its compensation delete also fails.
+        $this->failPublicDiskWritesAndDeletes();
+
+        Log::shouldReceive('error')->atLeast()->once()->withArgs(
+            fn (string $message): bool => str_contains($message, 'Berkas publik masih ada setelah kegagalan salin'),
+        );
+
+        $this->actingAs($operator);
+
+        try {
+            app(PublishMediaToPortal::class)->publish($operator, $media);
+            $this->fail('Expected the failed copy to surface.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('copy failed', $exception->getMessage());
+        }
+
+        $media->refresh();
+        $this->assertFalse($media->is_public);
+        $this->assertSame('local', $media->disk);
+        Storage::disk('local')->assertExists('private/gallery-media/foto.jpg');
+    }
+
+    private function failLocalDiskDeletes(\Closure $deleteResult): void
+    {
+        $this->wrapDisk('local', deleteResult: $deleteResult);
+    }
+
+    private function failPublicDiskDeletes(\Closure $deleteResult): void
+    {
+        $this->wrapDisk('public', deleteResult: $deleteResult);
+    }
+
+    private function failPublicDiskWritesAndDeletes(): void
+    {
+        $this->wrapDisk(
+            'public',
+            deleteResult: fn (): bool => false,
+            putResult: fn (): never => throw new \RuntimeException('copy failed'),
+        );
+    }
+
+    /**
+     * Rebind a disk to a thin adapter whose `delete()`/`put()` results are
+     * controlled, so cleanup-failure handling can be exercised deterministically.
+     */
+    private function wrapDisk(string $disk, ?\Closure $deleteResult = null, ?\Closure $putResult = null): void
+    {
+        /** @var FilesystemAdapter $original */
+        $original = Storage::disk($disk);
+
+        $wrapper = new class($original, $deleteResult, $putResult) extends FilesystemAdapter
+        {
+            public function __construct(
+                FilesystemAdapter $inner,
+                private ?\Closure $deleteResult,
+                private ?\Closure $putResult,
+            ) {
+                parent::__construct($inner->getDriver(), $inner->getAdapter(), $inner->getConfig());
+            }
+
+            public function delete($paths)
+            {
+                return $this->deleteResult ? ($this->deleteResult)() : parent::delete($paths);
+            }
+
+            public function put($path, $contents, $options = [])
+            {
+                return $this->putResult ? ($this->putResult)() : parent::put($path, $contents, $options);
+            }
+        };
+
+        Storage::set($disk, $wrapper);
+    }
+
+    private function validJpegBytes(): string
+    {
+        // A minimal, valid 1x1 JPEG so content-based MIME detection passes
+        // independently of the disk/prefix guard under test.
+        return base64_decode(
+            '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////'.
+            '////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBAB'.
+            'AAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=',
+            true,
+        );
     }
 
     private function publishedGallery(OrganizationUnit $unit): Gallery

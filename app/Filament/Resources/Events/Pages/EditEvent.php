@@ -10,6 +10,8 @@ use App\Models\Event;
 use Filament\Actions\Action;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 class EditEvent extends EditRecord
 {
@@ -18,13 +20,36 @@ class EditEvent extends EditRecord
     protected function handleRecordUpdate(Model $record, array $data): Model
     {
         /** @var Event $record */
-        $coverPath = $data['cover_path'] ?? null;
+        $coverPath = $this->normalizeCoverPath($data['cover_path'] ?? null);
         $altText = $data['cover_alt_text'] ?? null;
         unset($data['cover_path'], $data['cover_alt_text']);
 
-        $record->fill($data)->save();
+        $previousCoverPath = $record->cover_path;
+
+        // Any staged cover file that is not the record's current cover must be
+        // removed if the initial (non-cover) save fails, so no orphan is left.
+        $stagedCover = $coverPath !== null && $coverPath !== $previousCoverPath ? $coverPath : null;
+
+        try {
+            $record->fill($data)->save();
+        } catch (Throwable $exception) {
+            if ($stagedCover !== null) {
+                Storage::disk('local')->delete($stagedCover);
+            }
+
+            throw $exception;
+        }
 
         return app(AturSampulEvent::class)->apply($record, $coverPath, $altText);
+    }
+
+    private function normalizeCoverPath(mixed $value): ?string
+    {
+        if (is_array($value)) {
+            $value = reset($value);
+        }
+
+        return is_string($value) && filled($value) ? $value : null;
     }
 
     protected function getHeaderActions(): array

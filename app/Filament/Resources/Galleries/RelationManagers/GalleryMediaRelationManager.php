@@ -20,6 +20,9 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Throwable;
 
 /**
  * Manages the files belonging to a single Gallery album.
@@ -62,6 +65,22 @@ class GalleryMediaRelationManager extends RelationManager
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                 ->maxSize(5120)
                 ->preserveFilenames(false)
+                ->preventFilePathTampering(true, fn (string $file): bool => str_starts_with($file, 'private/gallery-media/'))
+                ->rules([
+                    fn (): \Closure => function (string $attribute, mixed $value, \Closure $fail): void {
+                        $paths = is_array($value) ? $value : [$value];
+
+                        foreach ($paths as $path) {
+                            if ($path instanceof TemporaryUploadedFile) {
+                                continue;
+                            }
+
+                            if (! is_string($path) || ! str_starts_with($path, 'private/gallery-media/')) {
+                                $fail('Berkas media harus diunggah melalui formulir ini.');
+                            }
+                        }
+                    },
+                ])
                 ->required(fn (string $operation): bool => $operation === 'create')
                 ->dehydrated(fn (string $operation): bool => $operation === 'create')
                 ->helperText('JPEG, PNG, atau WebP maksimal 5 MB. Tersimpan privat sampai Anda menerbitkannya.')
@@ -102,17 +121,41 @@ class GalleryMediaRelationManager extends RelationManager
                         $gallery = $this->getOwnerRecord();
 
                         $disk = Storage::disk('local');
+                        $path = is_array($data['file']) ? reset($data['file']) : $data['file'];
 
-                        return $gallery->media()->create([
-                            'organization_unit_id' => $gallery->organization_unit_id,
-                            'disk' => 'local',
-                            'path' => $data['file'],
-                            'mime_type' => rescue(fn (): ?string => $disk->mimeType($data['file']), report: false),
-                            'size' => rescue(fn (): ?int => $disk->size($data['file']), report: false),
-                            'alt_text' => $data['alt_text'],
-                            'is_public' => false,
-                            'sort_order' => $data['sort_order'] ?? 0,
-                        ]);
+                        if (! is_string($path) || ! str_starts_with($path, 'private/gallery-media/')) {
+                            throw ValidationException::withMessages([
+                                'file' => 'Berkas media harus diunggah melalui formulir ini.',
+                            ]);
+                        }
+
+                        $mimeType = $disk->mimeType($path);
+                        $size = $disk->size($path);
+
+                        if (! is_string($mimeType) || ! in_array($mimeType, ['image/jpeg', 'image/png', 'image/webp'], true) || ! is_int($size)) {
+                            $disk->delete($path);
+
+                            throw ValidationException::withMessages([
+                                'file' => 'Berkas media tidak dapat dibaca atau bukan gambar yang diizinkan.',
+                            ]);
+                        }
+
+                        try {
+                            return $gallery->media()->create([
+                                'organization_unit_id' => $gallery->organization_unit_id,
+                                'disk' => 'local',
+                                'path' => $path,
+                                'mime_type' => $mimeType,
+                                'size' => $size,
+                                'alt_text' => $data['alt_text'],
+                                'is_public' => false,
+                                'sort_order' => $data['sort_order'] ?? 0,
+                            ]);
+                        } catch (Throwable $exception) {
+                            $disk->delete($path);
+
+                            throw $exception;
+                        }
                     }),
             ])
             ->recordActions([
@@ -121,7 +164,10 @@ class GalleryMediaRelationManager extends RelationManager
                 Action::make('publishToPortal')
                     ->label('Terbitkan media')
                     ->icon('heroicon-o-arrow-up-tray')
-                    ->visible(fn (Media $record): bool => ! $record->is_public && $this->isOwnerPublished())
+                    ->visible(fn (Media $record): bool => ! $record->is_public
+                        && $record->disk === 'local'
+                        && str_starts_with((string) $record->path, 'private/gallery-media/')
+                        && $this->isOwnerPublished())
                     ->schema([
                         TextInput::make('alt_text')
                             ->label('Teks alternatif')

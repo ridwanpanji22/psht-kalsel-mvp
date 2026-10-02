@@ -11,6 +11,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 class EventForm
 {
@@ -38,6 +39,22 @@ class EventForm
                 ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                 ->maxSize(5120)
                 ->preserveFilenames(false)
+                ->preventFilePathTampering(true, fn (string $file): bool => str_starts_with($file, 'private/event-covers/'))
+                ->rules([
+                    fn (): \Closure => function (string $attribute, mixed $value, \Closure $fail): void {
+                        $paths = is_array($value) ? $value : [$value];
+
+                        foreach ($paths as $path) {
+                            if ($path instanceof TemporaryUploadedFile) {
+                                continue;
+                            }
+
+                            if (! is_string($path) || ! str_starts_with($path, 'private/event-covers/')) {
+                                $fail('Sampul harus diunggah melalui formulir ini.');
+                            }
+                        }
+                    },
+                ])
                 ->helperText('Opsional. JPEG, PNG, atau WebP maksimal 5 MB. Tersimpan privat sampai kegiatan terbit.')
                 ->columnSpanFull(),
             TextInput::make('cover_alt_text')
