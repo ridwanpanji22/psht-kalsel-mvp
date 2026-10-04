@@ -6,15 +6,80 @@ use Tests\TestCase;
 
 class AuthViewsRenderTest extends TestCase
 {
-    public function test_login_page_renders_with_google_and_firebase_hooks(): void
+    public function test_login_page_renders_required_firebase_and_recovery_hooks(): void
     {
-        $this->get('/admin/login')
-            ->assertOk()
-            ->assertSee('Masuk dengan Google')
-            ->assertSee('google-login-button')
-            ->assertSee('data-firebase-login')
-            ->assertSee('window._FIREBASE_CONFIG', escape: false)
-            ->assertSee('build/assets/app-', escape: false);
+        // Spec §3 contract: all DOM hooks consumed by firebase-auth.js must remain rendered.
+        // Assert IDs/data attributes without coupling to incidental copy or class implementation.
+        $html = $this->get('/admin/login')->assertOk()->getContent();
+
+        $this->assertStringContainsString('data-firebase-login-wrapper', $html, 'Root wrapper hook missing.');
+        $this->assertStringContainsString('data-firebase-login', $html, 'Login section hook missing.');
+        $this->assertStringContainsString('id="login-form"', $html, 'Login form ID missing.');
+        $this->assertStringContainsString('id="input-email"', $html, 'Email input ID missing.');
+        $this->assertStringContainsString('id="input-password"', $html, 'Password input ID missing.');
+        $this->assertStringContainsString('id="login-submit-button"', $html, 'Login submit button ID missing.');
+        $this->assertStringContainsString('id="google-login-button"', $html, 'Google login button ID missing.');
+        $this->assertStringContainsString('id="login-status"', $html, 'Login status element ID missing.');
+
+        // Recovery/linking flow hooks
+        $this->assertStringContainsString('id="link-password-section"', $html, 'Link password section ID missing.');
+        $this->assertStringContainsString('id="link-password-form"', $html, 'Link password form ID missing.');
+        $this->assertStringContainsString('id="link-password"', $html, 'Link password input ID missing.');
+        $this->assertStringContainsString('id="link-google-submit"', $html, 'Link Google submit button ID missing.');
+        $this->assertStringContainsString('id="link-google-cancel"', $html, 'Link Google cancel button ID missing.');
+
+        // Firebase config script
+        $this->assertStringContainsString('window._FIREBASE_CONFIG', $html, 'Firebase config script missing.');
+    }
+
+    public function test_login_page_has_responsive_layout_contract(): void
+    {
+        // Behavior-level layout contract: one marked root, one H1, desktop/mobile layout markers,
+        // md responsive visibility switch, no document tags inside component, no activation hooks.
+        $html = $this->get('/admin/login')->assertOk()->getContent();
+
+        // One marked root component
+        $this->assertSame(
+            1,
+            substr_count($html, 'data-firebase-login-wrapper'),
+            'Expected exactly one data-firebase-login-wrapper root.',
+        );
+
+        // One H1 for accessibility
+        $this->assertSame(
+            1,
+            preg_match_all('/<h1[\s>]/i', $html),
+            'Expected exactly one H1 heading.',
+        );
+
+        // Semantic layout markers identify the desktop identity panel and mobile wordmark header.
+        $this->assertSame(1, substr_count($html, 'data-login-desktop-panel'), 'Expected one desktop identity panel marker.');
+        $this->assertSame(1, substr_count($html, 'data-login-mobile-header'), 'Expected one mobile brand header marker.');
+
+        // Semantic Tailwind visibility utilities express the md breakpoint switch in rendered markup.
+        $this->assertMatchesRegularExpression(
+            '/class="(?=[^"]*\bhidden\b)(?=[^"]*\bmd:block\b)[^"]*"/',
+            $html,
+            'Expected desktop-only content to use hidden and md:block visibility utilities.',
+        );
+        $this->assertMatchesRegularExpression(
+            '/class="[^"]*\bmd:hidden\b[^"]*"/',
+            $html,
+            'Expected mobile-only content to use md:hidden visibility utility.',
+        );
+
+        // No document tags inside component; the outer Filament layout owns the full document.
+        $componentStart = strpos($html, 'data-firebase-login-wrapper');
+        $this->assertNotFalse($componentStart, 'Login component wrapper must be rendered.');
+        $componentContent = substr($html, $componentStart, strpos($html, '</html>') - $componentStart);
+        $this->assertStringNotContainsString('<!doctype', strtolower($componentContent), 'Component must not inject a nested doctype.');
+        $this->assertStringNotContainsString('<html', strtolower($componentContent), 'Component must not inject nested <html>.');
+
+
+        // No activation onboarding hooks on login page
+        $this->assertStringNotContainsString('id="input-name"', $html, 'Activation name input must not appear on login page.');
+        $this->assertStringNotContainsString('id="input-password-confirm"', $html, 'Activation confirmation input must not appear on login page.');
+        $this->assertStringNotContainsString('Aktifkan Akun', $html, 'Activation submit text must not appear on login page.');
     }
 
     public function test_login_page_renders_as_a_single_valid_document_without_nested_layout_tags(): void
@@ -61,10 +126,8 @@ class AuthViewsRenderTest extends TestCase
         // Custom view must not re-declare the document title; Filament's layout owns <head>.
         $this->assertStringNotContainsString('<title>Masuk Operator', $html, 'Component view must not inject its own <title>.');
 
-        // Login markers still present after the refactor.
+        // Login component content remains rendered inside the document.
         $this->assertStringContainsString('data-firebase-login', $html);
-        $this->assertStringContainsString('Masuk dengan Google', $html);
-        $this->assertStringContainsString('build/assets/app-', $html);
     }
 
     public function test_login_page_renders_in_page_password_linking_markers(): void
