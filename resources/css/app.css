@@ -295,3 +295,323 @@
         scroll-behavior: auto !important;
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Operator login                                                       */
+/* ------------------------------------------------------------------ */
+
+.login-shell {
+    min-height: 100dvh;
+    color: #f8fafc;
+    background: var(--color-psht-bg);
+    color-scheme: dark;
+    font-family: var(--font-sans);
+}
+
+.login-shell__layout {
+    display: grid;
+    min-height: 100dvh;
+    grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+}
+
+.login-shell__identity {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: clamp(2rem, 6vw, 6rem);
+    background: var(--color-psht-deep);
+}
+
+.login-shell__wordmark {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem;
+    color: #fff;
+    font-size: 1.1rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    line-height: 1.2;
+    text-decoration: none;
+    text-transform: uppercase;
+}
+
+.login-shell__wordmark span {
+    color: #94a3b8;
+    font-size: 0.65rem;
+    letter-spacing: 0.08em;
+}
+
+.login-shell__eyebrow {
+    margin: 0;
+    color: var(--color-psht-gold);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.login-shell__identity-copy {
+    max-width: 34rem;
+    margin-block: auto;
+    padding-block: 4rem;
+}
+
+.login-shell__identity-copy h2 {
+    max-width: 11ch;
+    margin: 1rem 0;
+    color: #fff;
+    font-size: clamp(2.5rem, 5vw, 5rem);
+    font-weight: 700;
+    letter-spacing: -0.05em;
+    line-height: 0.98;
+}
+
+.login-shell__identity-copy p:last-child,
+.login-shell__public-link,
+.login-shell__mobile-header p {
+    color: #a8b3c4;
+    font-size: 0.9rem;
+    line-height: 1.65;
+}
+
+.login-shell__public-link {
+    color: #dbeafe;
+    text-decoration: underline;
+    text-decoration-color: var(--color-psht-bright);
+    text-underline-offset: 0.3em;
+}
+
+.login-shell__form-column {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    padding: clamp(1.25rem, 5vw, 5rem);
+    background: var(--color-psht-bg);
+}
+
+.login-shell__mobile-header {
+    margin: 0 auto 1.5rem;
+    width: min(100%, 34rem);
+}
+
+.login-shell__mobile-header p {
+    margin: 0.6rem 0 0;
+}
+
+.login-shell__form-card {
+    width: min(100%, 34rem);
+    margin-inline: auto;
+    padding: clamp(1.25rem, 4vw, 2.75rem);
+    border: 1px solid rgb(255 255 255 / 0.12);
+    border-radius: 1rem;
+    background: var(--color-psht-surface);
+    box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 0.2);
+}
+
+.login-shell__heading h1 {
+    margin: 0.7rem 0 0;
+    color: #fff;
+    font-size: clamp(1.8rem, 4vw, 2.5rem);
+    letter-spacing: -0.04em;
+    line-height: 1.1;
+}
+
+.login-shell__heading > p:last-child {
+    margin: 0.85rem 0 0;
+    color: #b8c2d1;
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+
+.login-shell__form {
+    display: grid;
+    gap: 1.15rem;
+    margin-top: 1.75rem;
+}
+
+.login-shell__field {
+    min-width: 0;
+}
+
+.login-shell__field label {
+    display: block;
+    margin-bottom: 0.45rem;
+    color: #f1f5f9;
+    font-size: 0.87rem;
+    font-weight: 600;
+}
+
+.login-shell__field input {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 2.75rem;
+    border: 1px solid rgb(255 255 255 / 0.2);
+    border-radius: 0.5rem;
+    background: #0b0f16;
+    color: #fff;
+    padding: 0.7rem 0.85rem;
+    font: inherit;
+}
+
+.login-shell__field input::placeholder {
+    color: #7f8da3;
+}
+
+.login-shell__field input:focus-visible,
+.login-shell :where(a, button):focus-visible {
+    outline: 2px solid var(--color-psht-bright);
+    outline-offset: 3px;
+}
+
+.login-shell__field input:focus {
+    border-color: var(--color-psht-bright);
+    box-shadow: 0 0 0 3px rgb(33 98 237 / 0.2);
+}
+
+.login-shell__button {
+    display: inline-flex;
+    min-height: 2.75rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    padding: 0.65rem 1rem;
+    font: inherit;
+    font-weight: 700;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background-color 180ms ease, border-color 180ms ease, transform 180ms ease;
+}
+
+.login-shell__button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.login-shell__button--primary {
+    border: 1px solid var(--color-psht-bright);
+    background: var(--color-psht-blue);
+    color: #fff;
+}
+
+.login-shell__button--primary:hover {
+    background: var(--color-psht-bright);
+}
+
+.login-shell__button--google {
+    width: 100%;
+    gap: 0.7rem;
+    border: 1px solid rgb(255 255 255 / 0.2);
+    background: #0b0f16;
+    color: #f8fafc;
+}
+
+.login-shell__button--google:hover,
+.login-shell__button--cancel:hover {
+    border-color: var(--color-psht-bright);
+    background: rgb(33 98 237 / 0.12);
+}
+
+.login-shell__google-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    flex: 0 0 auto;
+}
+
+.login-shell__divider {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+    color: #94a3b8;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.login-shell__divider span:first-child,
+.login-shell__divider span:last-child {
+    height: 1px;
+    background: rgb(255 255 255 / 0.14);
+}
+
+.login-shell__status {
+    margin: 1.25rem 0 0;
+    border: 1px solid rgb(251 191 36 / 0.5);
+    border-radius: 0.5rem;
+    background: rgb(251 191 36 / 0.1);
+    color: #fde68a;
+    padding: 0.75rem;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.login-shell__recovery {
+    margin-top: 1.5rem;
+    border: 1px solid rgb(251 191 36 / 0.55);
+    border-radius: 0.75rem;
+    background: rgb(251 191 36 / 0.1);
+    padding: 1rem;
+}
+
+.login-shell__recovery h2 {
+    margin: 0;
+    color: #fde68a;
+    font-size: 1rem;
+}
+
+.login-shell__recovery > p {
+    margin: 0.5rem 0 0;
+    color: #fef3c7;
+    font-size: 0.9rem;
+    line-height: 1.55;
+}
+
+.login-shell__recovery .login-shell__form {
+    margin-top: 1rem;
+}
+
+.login-shell__recovery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+}
+
+.login-shell__recovery-actions .login-shell__button {
+    flex: 1 1 10rem;
+}
+
+.login-shell__button--cancel {
+    border: 1px solid rgb(255 255 255 / 0.2);
+    background: transparent;
+    color: #f8fafc;
+}
+
+@media (max-width: 767px) {
+    .login-shell__layout {
+        display: block;
+        min-height: auto;
+    }
+
+    .login-shell__form-column {
+        min-height: 100dvh;
+        justify-content: flex-start;
+        padding: max(1.25rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1.5rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+    }
+
+    .login-shell__form-card {
+        box-shadow: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .login-shell * {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+    }
+}
