@@ -1,7 +1,7 @@
 # Spesifikasi Desain: Penyegaran UI Login Operator PSHT Kalsel
 
 **Tanggal:** 2026-10-05
-**Status:** Disetujui secara lisan; menunggu tinjauan spesifikasi tertulis  
+**Status:** Disetujui pengguna pada 2026-10-05
 **Cakupan:** Tampilan `/admin/login`; alur Firebase dan route autentikasi tidak berubah.
 
 ## 1. Tujuan
