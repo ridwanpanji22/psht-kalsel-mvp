@@ -628,6 +628,11 @@
         box-shadow: none;
     }
 }
+@media (max-width: 767px) {
+    .login-shell__identity {
+        display: none;
+    }
+}
 
 @media (prefers-reduced-motion: reduce) {
     .login-shell * {
