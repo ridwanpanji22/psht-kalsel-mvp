@@ -52,21 +52,27 @@ class AuthViewsRenderTest extends TestCase
             'Expected exactly one H1 heading.',
         );
 
-        // Semantic layout markers identify the desktop identity panel and mobile wordmark header.
-        $this->assertSame(1, substr_count($html, 'data-login-desktop-panel'), 'Expected one desktop identity panel marker.');
-        $this->assertSame(1, substr_count($html, 'data-login-mobile-header'), 'Expected one mobile brand header marker.');
+        // Semantic layout markers and their visibility utilities are bound to the same rendered element.
+        $assertMarkedRegionHasClasses = function (string $marker, array $requiredClasses) use ($html): void {
+            $this->assertSame(
+                1,
+                preg_match_all('/<[a-z][^>]*\b' . preg_quote($marker, '/') . '\b[^>]*>/i', $html, $tags),
+                "Expected exactly one rendered element with {$marker}.",
+            );
+            $this->assertSame(
+                1,
+                preg_match('/\bclass\s*=\s*(["\'])(.*?)\1/i', $tags[0][0], $classAttribute),
+                "Expected {$marker} element to have a class attribute.",
+            );
 
-        // Visibility utilities must appear on the matching semantic layout regions, not elsewhere.
-        $this->assertSame(
-            1,
-            preg_match_all('/<[a-z][^>]*\bdata-login-desktop-panel\b(?=[^>]*\bclass="[^"]*(?<!\S)hidden(?!\S)[^"]*(?<!\S)md:block(?!\S)[^"]*")[^>]*>/i', $html),
-            'Expected the desktop identity panel itself to use hidden md:block visibility.',
-        );
-        $this->assertSame(
-            1,
-            preg_match_all('/<[a-z][^>]*\bdata-login-mobile-header\b(?=[^>]*\bclass="[^"]*(?<!\S)md:hidden(?!\S)[^"]*")[^>]*>/i', $html),
-            'Expected the mobile brand header itself to use md:hidden visibility.',
-        );
+            $classes = preg_split('/\s+/', trim($classAttribute[2]));
+            foreach ($requiredClasses as $requiredClass) {
+                $this->assertContains($requiredClass, $classes, "Expected {$marker} element to use {$requiredClass}.");
+            }
+        };
+
+        $assertMarkedRegionHasClasses('data-login-desktop-panel', ['hidden', 'md:block']);
+        $assertMarkedRegionHasClasses('data-login-mobile-header', ['md:hidden']);
 
         // No document tags inside component; the outer Filament layout owns the full document.
         $componentStart = strpos($html, 'data-firebase-login-wrapper');
