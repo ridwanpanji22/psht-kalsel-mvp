@@ -18,8 +18,8 @@
         <aside data-login-desktop-panel class="login-shell__identity hidden md:block" aria-label="Identitas PSHT Kalimantan Selatan">
             <a href="{{ route('public.home') }}" class="login-shell__wordmark">PSHT <span>Kalimantan Selatan</span></a>
             <div class="login-shell__identity-copy">
-                <p class="login-shell__eyebrow">Portal operator</p>
-                <h2>Jaga gerak organisasi tetap terarah.</h2>
+                <p class="login-shell__eyebrow">Internal · Operator terdaftar</p>
+                <h2>Satu organisasi. Satu ruang kerja.</h2>
                 <p>Kelola layanan internal PSHT Kalimantan Selatan dengan akses operator yang aman dan terukur.</p>
             </div>
             <a href="{{ route('public.home') }}" class="login-shell__public-link">Kembali ke portal publik</a>

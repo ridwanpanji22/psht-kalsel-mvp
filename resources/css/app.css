@@ -300,6 +300,26 @@
 /* Operator login                                                       */
 /* ------------------------------------------------------------------ */
 
+.fi-simple-layout:has([data-firebase-login-wrapper]),
+.fi-simple-layout:has([data-firebase-login-wrapper]) .fi-simple-main-ctn {
+    align-items: stretch;
+}
+
+
+.fi-simple-layout:has([data-firebase-login-wrapper]) .fi-simple-main {
+    display: flex;
+    width: 100%;
+    max-width: none;
+    flex: 1 1 auto;
+    align-items: stretch;
+    margin: 0;
+    border-radius: 0;
+    background: var(--color-psht-bg);
+    padding: 0;
+    box-shadow: none;
+    --tw-ring-shadow: 0 0 #0000;
+}
+
 .login-shell {
     min-height: 100dvh;
     color: #f8fafc;
@@ -599,7 +619,7 @@
     }
 
     .login-shell__form-column {
-        min-height: 100dvh;
+        min-height: 0;
         justify-content: flex-start;
         padding: max(1.25rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1.5rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
     }
