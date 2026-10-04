@@ -56,16 +56,16 @@ class AuthViewsRenderTest extends TestCase
         $this->assertSame(1, substr_count($html, 'data-login-desktop-panel'), 'Expected one desktop identity panel marker.');
         $this->assertSame(1, substr_count($html, 'data-login-mobile-header'), 'Expected one mobile brand header marker.');
 
-        // Semantic Tailwind visibility utilities express the md breakpoint switch in rendered markup.
-        $this->assertMatchesRegularExpression(
-            '/class="(?=[^"]*\bhidden\b)(?=[^"]*\bmd:block\b)[^"]*"/',
-            $html,
-            'Expected desktop-only content to use hidden and md:block visibility utilities.',
+        // Visibility utilities must appear on the matching semantic layout regions, not elsewhere.
+        $this->assertSame(
+            1,
+            preg_match_all('/<[a-z][^>]*\bdata-login-desktop-panel\b(?=[^>]*\bclass="[^"]*(?<!\S)hidden(?!\S)[^"]*(?<!\S)md:block(?!\S)[^"]*")[^>]*>/i', $html),
+            'Expected the desktop identity panel itself to use hidden md:block visibility.',
         );
-        $this->assertMatchesRegularExpression(
-            '/class="[^"]*\bmd:hidden\b[^"]*"/',
-            $html,
-            'Expected mobile-only content to use md:hidden visibility utility.',
+        $this->assertSame(
+            1,
+            preg_match_all('/<[a-z][^>]*\bdata-login-mobile-header\b(?=[^>]*\bclass="[^"]*(?<!\S)md:hidden(?!\S)[^"]*")[^>]*>/i', $html),
+            'Expected the mobile brand header itself to use md:hidden visibility.',
         );
 
         // No document tags inside component; the outer Filament layout owns the full document.
@@ -76,7 +76,8 @@ class AuthViewsRenderTest extends TestCase
         $this->assertStringNotContainsString('<html', strtolower($componentContent), 'Component must not inject nested <html>.');
 
 
-        // No activation onboarding hooks on login page
+        // Activation onboarding controls belong on /admin/activate, never /admin/login.
+        $this->assertStringNotContainsString('data-firebase-activate', $html, 'Activation hook must not appear on login page.');
         $this->assertStringNotContainsString('id="input-name"', $html, 'Activation name input must not appear on login page.');
         $this->assertStringNotContainsString('id="input-password-confirm"', $html, 'Activation confirmation input must not appear on login page.');
         $this->assertStringNotContainsString('Aktifkan Akun', $html, 'Activation submit text must not appear on login page.');
@@ -97,6 +98,7 @@ class AuthViewsRenderTest extends TestCase
         $this->assertSame(1, substr_count($lower, '</html>'), 'Expected exactly one </html>.');
         // Use an explicit boundary so <header> is not mistaken for <head>.
         $this->assertSame(1, preg_match_all('/<head[\s>]/i', $html), 'Expected exactly one <head>.');
+        $this->assertSame(1, preg_match_all('/<title[\s>]/i', $html), 'Expected exactly one document title.');
         $this->assertSame(1, substr_count($lower, '</head>'), 'Expected exactly one </head>.');
         $this->assertSame(1, substr_count($lower, '<body'), 'Expected exactly one <body>.');
         $this->assertSame(1, substr_count($lower, '</body>'), 'Expected exactly one </body>.');
