@@ -612,6 +612,13 @@
     color: #f8fafc;
 }
 
+.login-shell .text-gray-500 {
+    color: #cbd5e1;
+}
+
+.login-shell .text-primary-600 {
+    color: #93c5fd;
+}
 @media (max-width: 767px) {
     .login-shell__layout {
         display: block;
