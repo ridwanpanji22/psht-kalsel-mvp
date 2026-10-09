@@ -156,24 +156,37 @@ class DemoPublicationSeeder extends Seeder
     }
 
     /**
-     * Pick a deterministic publisher for a submitter, never the submitter.
+     * Pick a deterministic publisher for a submitter: never the submitter, and
+     * always an operator whose visible scope covers the content owner unit.
+     *
+     * For unit-scoped content the candidate must have the owner unit in
+     * `visibleUnitIds()` (the province operator qualifies for every descendant
+     * unit). For unit-less pages the owner is null and any active operator may
+     * view the page (see PagePolicy), so the whole reviewer pool is eligible.
      *
      * @param  list<User>  $reviewers
      */
-    private function publisherFor(User $submitter, array $reviewers, int $salt = 0): User
+    private function publisherFor(User $submitter, array $reviewers, ?OrganizationUnit $owner, int $salt = 0): User
     {
-        $count = count($reviewers);
+        $candidates = array_values(array_filter(
+            $reviewers,
+            fn (User $candidate): bool => $owner === null
+                || in_array($owner->id, $candidate->visibleUnitIds(), true),
+        ));
+
+        $count = count($candidates);
 
         for ($offset = 0; $offset < $count; $offset++) {
-            $candidate = $reviewers[($salt + $offset) % $count];
+            $candidate = $candidates[($salt + $offset) % $count];
 
             if ($candidate->id !== $submitter->id) {
                 return $candidate;
             }
         }
 
-        // Unreachable with a non-empty pool containing at least two operators.
-        throw new LogicException('Seeder demo memerlukan minimal dua operator untuk review publikasi.');
+        throw new LogicException(
+            'Seeder demo memerlukan operator lain yang memiliki unit pemilik dalam cakupan untuk review publikasi.',
+        );
     }
 
     /**
@@ -187,26 +200,31 @@ class DemoPublicationSeeder extends Seeder
     {
         $province = $context->province();
         $provinceOperator = $operatorByUnitId[$province->id] ?? $fallback;
+        $slugs = [];
 
+        $profileSlug = 'profil-organisasi-psht-kalimantan-selatan';
         $this->upsertPage(
-            slug: 'profil-organisasi-psht-kalimantan-selatan',
+            slug: $profileSlug,
             kind: 'organization_profile',
             title: 'Profil Organisasi PSHT Kalimantan Selatan',
             unit: null,
             status: PublicationStatus::Published,
             submittedBy: $provinceOperator,
-            publishedBy: $this->publisherFor($provinceOperator, $reviewers, 0),
+            publishedBy: $this->publisherFor($provinceOperator, $reviewers, null, 0),
         );
+        $slugs[] = $profileSlug;
 
+        $historySlug = 'sejarah-psht-kalimantan-selatan';
         $this->upsertPage(
-            slug: 'sejarah-psht-kalimantan-selatan',
+            slug: $historySlug,
             kind: 'general_history',
             title: 'Sejarah PSHT Kalimantan Selatan',
             unit: null,
             status: PublicationStatus::Published,
             submittedBy: $provinceOperator,
-            publishedBy: $this->publisherFor($provinceOperator, $reviewers, 1),
+            publishedBy: $this->publisherFor($provinceOperator, $reviewers, null, 1),
         );
+        $slugs[] = $historySlug;
 
         $branches = array_values($context->branches());
         $historyStatuses = [
@@ -220,21 +238,25 @@ class DemoPublicationSeeder extends Seeder
             $branch = $branches[$index];
             $operator = $operatorByUnitId[$branch->id] ?? $fallback;
             $status = $historyStatuses[$index % count($historyStatuses)];
+            $slug = 'sejarah-'.$this->slugify($branch->name);
 
             $this->upsertPage(
-                slug: 'sejarah-'.$this->slugify($branch->name),
+                slug: $slug,
                 kind: 'branch_history',
                 title: 'Sejarah '.$branch->name,
                 unit: $branch,
                 status: $status,
                 submittedBy: $operator,
                 publishedBy: $status === PublicationStatus::Published
-                    ? $this->publisherFor($operator, $reviewers, $index + 2)
+                    ? $this->publisherFor($operator, $reviewers, $branch, $index + 2)
                     : null,
             );
+            $slugs[] = $slug;
         }
 
-        $context->putPublicationKeys(Page::class, Page::query()->orderBy('id')->pluck('slug')->all());
+        // Record ONLY the deterministic slugs this run created, never every
+        // existing page slug, so the workflow seeder cannot touch unrelated rows.
+        $context->putPublicationKeys(Page::class, $slugs);
     }
 
     private function upsertPage(
@@ -274,6 +296,7 @@ class DemoPublicationSeeder extends Seeder
     {
         $owners = array_values([...$context->branches(), ...$context->rantings()]);
         $ownerCount = count($owners);
+        $slugs = [];
 
         // Deterministic offsets: the first group is upcoming, the second past.
         $upcomingTotal = 20;
@@ -312,14 +335,16 @@ class DemoPublicationSeeder extends Seeder
                     'status' => $status,
                     'submitted_by_id' => $operator->id,
                     'published_by_id' => $isPublished
-                        ? $this->publisherFor($operator, $reviewers, $index)->id
+                        ? $this->publisherFor($operator, $reviewers, $owner, $index)->id
                         : null,
                     'published_at' => $isPublished ? self::PUBLISHED_AT : null,
                 ],
             );
+
+            $slugs[] = $slug;
         }
 
-        $context->putPublicationKeys(Event::class, Event::query()->orderBy('id')->pluck('slug')->all());
+        $context->putPublicationKeys(Event::class, $slugs);
     }
 
     /**
@@ -338,6 +363,7 @@ class DemoPublicationSeeder extends Seeder
             ...array_values($context->specialUnits()),
         ]);
         $ownerCount = count($owners);
+        $slugs = [];
 
         // Ensure every required owner type is represented from the first slots.
         $ownerTypes = [OrganizationUnitType::Cabang, OrganizationUnitType::Ranting, OrganizationUnitType::Rayon, OrganizationUnitType::Ukm, OrganizationUnitType::Komisariat];
@@ -384,14 +410,16 @@ class DemoPublicationSeeder extends Seeder
                     'verified_at' => $isVerified ? self::PUBLISHED_AT : null,
                     'submitted_by_id' => $operator->id,
                     'published_by_id' => $isPublished
-                        ? $this->publisherFor($operator, $reviewers, $index)->id
+                        ? $this->publisherFor($operator, $reviewers, $owner, $index)->id
                         : null,
                     'published_at' => $isPublished ? self::PUBLISHED_AT : null,
                 ],
             );
+
+            $slugs[] = $slug;
         }
 
-        $context->putPublicationKeys(TrainingLocation::class, TrainingLocation::query()->orderBy('id')->pluck('slug')->all());
+        $context->putPublicationKeys(TrainingLocation::class, $slugs);
     }
 
     /**
@@ -413,6 +441,7 @@ class DemoPublicationSeeder extends Seeder
             ...array_values($context->specialUnits()),
         ]);
         $ownerCount = count($owners);
+        $slugs = [];
 
         // Force one gallery per required owner type into the first slots so the
         // coverage invariant holds: branch, ranting, UKM, and Komisariat.
@@ -454,14 +483,16 @@ class DemoPublicationSeeder extends Seeder
                     'status' => $status,
                     'submitted_by_id' => $operator->id,
                     'published_by_id' => $isPublished
-                        ? $this->publisherFor($operator, $reviewers, $index)->id
+                        ? $this->publisherFor($operator, $reviewers, $owner, $index)->id
                         : null,
                     'published_at' => $isPublished ? self::PUBLISHED_AT : null,
                 ],
             );
+
+            $slugs[] = $slug;
         }
 
-        $context->putPublicationKeys(Gallery::class, Gallery::query()->orderBy('id')->pluck('slug')->all());
+        $context->putPublicationKeys(Gallery::class, $slugs);
     }
 
     private function eventCoverPath(int $index): string

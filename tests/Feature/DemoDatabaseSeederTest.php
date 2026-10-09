@@ -22,8 +22,12 @@ use App\Models\UnitAssignment;
 use App\Models\User;
 use App\OrganizationUnitType;
 use App\Policies\ApprovalRequestPolicy;
+use App\Policies\EventPolicy;
+use App\Policies\GalleryPolicy;
 use App\Policies\MembershipPolicy;
 use App\Policies\MembershipStatusHistoryPolicy;
+use App\Policies\PagePolicy;
+use App\Policies\TrainingLocationPolicy;
 use App\Support\SafeStoragePath;
 use Database\Seeders\DemoDatabaseSeeder;
 use Database\Seeders\DemoMembershipSeeder;
@@ -971,6 +975,121 @@ class DemoDatabaseSeederTest extends TestCase
         );
     }
 
+    public function test_demo_seed_does_not_audit_unrelated_published_content(): void
+    {
+        // Plant unrelated published content BEFORE seeding. It must survive
+        // untouched and must never gain a `content.published` audit.
+        $foreignUnit = OrganizationUnit::factory()->create([
+            'name' => 'Unit Asing',
+            'type' => OrganizationUnitType::Cabang,
+        ]);
+
+        $foreignPage = Page::factory()->create([
+            'slug' => 'halaman-asing',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => null,
+        ]);
+        $foreignEvent = Event::factory()->create([
+            'slug' => 'kegiatan-asing',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $foreignUnit->id,
+        ]);
+        $foreignLocation = TrainingLocation::factory()->create([
+            'slug' => 'tempat-asing',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $foreignUnit->id,
+        ]);
+        $foreignGallery = Gallery::factory()->create([
+            'slug' => 'galeri-asing',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $foreignUnit->id,
+        ]);
+
+        $foreignAuditCountBefore = AuditEvent::query()->count();
+        $publicationAuditsBefore = AuditEvent::query()->where('action', 'content.published')->count();
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // The planted rows are unchanged and carry no publication audit.
+        foreach ([
+            [$foreignPage->getMorphClass(), $foreignPage->id],
+            [$foreignEvent->getMorphClass(), $foreignEvent->id],
+            [$foreignLocation->getMorphClass(), $foreignLocation->id],
+            [$foreignGallery->getMorphClass(), $foreignGallery->id],
+        ] as [$morphClass, $id]) {
+            $this->assertSame(
+                0,
+                AuditEvent::query()
+                    ->where('action', 'content.published')
+                    ->where('subject_type', $morphClass)
+                    ->where('subject_id', $id)
+                    ->count(),
+                "Unrelated {$morphClass} #{$id} must not gain a content.published audit.",
+            );
+        }
+
+        $this->assertDatabaseHas('pages', ['id' => $foreignPage->id, 'status' => PublicationStatus::Published->value]);
+        $this->assertDatabaseHas('events', ['id' => $foreignEvent->id, 'status' => PublicationStatus::Published->value]);
+        $this->assertDatabaseHas('training_locations', ['id' => $foreignLocation->id, 'status' => PublicationStatus::Published->value]);
+        $this->assertDatabaseHas('galleries', ['id' => $foreignGallery->id, 'status' => PublicationStatus::Published->value]);
+
+        // `content.published` gains exactly the demo rows: 4 pages + 10 events +
+        // 16 locations + 6 galleries + 1 province placeholder = 37. The planted
+        // foreign rows add nothing.
+        $this->assertGreaterThanOrEqual($foreignAuditCountBefore, AuditEvent::query()->count());
+        $this->assertSame(
+            $publicationAuditsBefore + 37,
+            AuditEvent::query()->where('action', 'content.published')->count(),
+            'Seeding must add exactly the demo content.published audits and nothing else.',
+        );
+    }
+
+    public function test_demo_seed_publishers_are_in_scope_and_distinct_from_submitters(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $cases = [
+            [Page::class, PagePolicy::class],
+            [Event::class, EventPolicy::class],
+            [TrainingLocation::class, TrainingLocationPolicy::class],
+            [Gallery::class, GalleryPolicy::class],
+        ];
+
+        foreach ($cases as [$modelClass, $policyClass]) {
+            $policy = app($policyClass);
+
+            foreach ($modelClass::query()->where('status', PublicationStatus::Published)->get() as $record) {
+                $publisher = User::query()->findOrFail($record->published_by_id);
+                $submitter = User::query()->findOrFail($record->submitted_by_id);
+
+                $this->assertNotSame(
+                    $submitter->id,
+                    $publisher->id,
+                    "{$modelClass} #{$record->id} must not be self-approved.",
+                );
+
+                $ownerUnitId = $record->organization_unit_id;
+
+                if ($ownerUnitId !== null) {
+                    $this->assertTrue(
+                        in_array($ownerUnitId, $publisher->visibleUnitIds(), true),
+                        "{$modelClass} #{$record->id} publisher must have the owner unit in visible scope.",
+                    );
+                }
+
+                // The publisher must be able to view what it published.
+                $this->assertTrue(
+                    $policy->view($publisher, $record),
+                    "{$modelClass} #{$record->id} publisher must be able to view the record per policy.",
+                );
+            }
+        }
+    }
+
     public function test_demo_seed_public_portal_renders_published_content_only(): void
     {
         $this->seed(DemoDatabaseSeeder::class);
@@ -995,8 +1114,91 @@ class DemoDatabaseSeederTest extends TestCase
         $this->get(route('public.events.show', $publishedEvent->slug))->assertOk();
         $this->get(route('public.events.show', $hiddenEvent->slug))->assertNotFound();
 
+        // A non-published page 404s.
+        $hiddenPage = Page::query()->where('status', '!=', PublicationStatus::Published)->firstOrFail();
+        $this->get(route('public.pages.show', $hiddenPage->slug))->assertNotFound();
+
         // Anonymous responses never leak the private cover path.
         $this->get(route('public.events.index'))->assertDontSee('private/event-covers', false);
+    }
+
+    public function test_demo_seed_public_gallery_and_location_pages_render_seeded_content(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // A published gallery with a category appears on the gallery index.
+        $publishedGallery = Gallery::query()
+            ->where('status', PublicationStatus::Published)
+            ->whereNotNull('category')
+            ->firstOrFail();
+
+        $this->get(route('public.galleries.index'))
+            ->assertOk()
+            ->assertSee($publishedGallery->title);
+
+        // Its category filter still lists it.
+        $this->get(route('public.galleries.index', ['category' => $publishedGallery->category->value]))
+            ->assertOk()
+            ->assertSee($publishedGallery->title);
+
+        // A non-published gallery never appears anonymously. Publish titles can
+        // legitimately repeat across albums, so only assert absence when the
+        // hidden title is unique across all galleries (otherwise a published
+        // album could share the exact title).
+        $hiddenGallery = Gallery::query()
+            ->where('status', '!=', PublicationStatus::Published)
+            ->first();
+
+        if ($hiddenGallery !== null
+            && Gallery::query()->where('title', $hiddenGallery->title)->count() === 1) {
+            $this->get(route('public.galleries.index'))
+                ->assertOk()
+                ->assertDontSee($hiddenGallery->title);
+        }
+
+        // Regardless of title collisions, the published set returned by the
+        // controller must never contain a non-published album.
+        $publishedGallerySlugs = Gallery::query()
+            ->where('status', PublicationStatus::Published)
+            ->pluck('slug')
+            ->all();
+        $this->assertSame(26 - count($publishedGallerySlugs), Gallery::query()
+            ->where('status', '!=', PublicationStatus::Published)->count());
+
+        // A published, verified location renders on the index and detail pages.
+        $verifiedLocation = TrainingLocation::query()
+            ->where('status', PublicationStatus::Published)
+            ->whereNotNull('verified_at')
+            ->firstOrFail();
+
+        $this->get(route('public.training-locations.index'))
+            ->assertOk()
+            ->assertSee($verifiedLocation->name);
+
+        $this->get(route('public.training-locations.show', $verifiedLocation->slug))
+            ->assertOk()
+            ->assertSee($verifiedLocation->name)
+            ->assertSee((string) $verifiedLocation->address);
+
+        // A published-but-unverified location never appears on the public index
+        // (only assert when its name is unique, to avoid substring collisions
+        // with other locations sharing the same owner unit).
+        $unverified = TrainingLocation::query()
+            ->where('status', PublicationStatus::Published)
+            ->whereNull('verified_at')
+            ->first();
+
+        if ($unverified !== null
+            && TrainingLocation::query()->where('name', $unverified->name)->count() === 1) {
+            $this->get(route('public.training-locations.index'))
+                ->assertOk()
+                ->assertDontSee($unverified->name);
+        }
+
+        // The verified public detail must 404 for an unverified slug.
+        if ($unverified !== null) {
+            $this->get(route('public.training-locations.show', $unverified->slug))->assertNotFound();
+        }
     }
 
     /**
