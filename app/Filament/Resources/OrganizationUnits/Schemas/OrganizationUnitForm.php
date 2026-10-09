@@ -29,11 +29,22 @@ class OrganizationUnitForm
                 ->disabledOn('edit'),
             Select::make('parent_id')
                 ->label('Induk formal')
-                ->options(fn (): array => OrganizationUnit::query()
-                    ->whereIn('id', app(OrganizationScope::class)->visibleUnitIds(auth()->user()))
-                    ->orderBy('name')
-                    ->pluck('name', 'id')
-                    ->all())
+                ->options(function (Get $get): array {
+                    $expectedParentType = OrganizationUnitType::tryFrom((string) $get('type'))?->expectedParentType();
+
+                    // A province root has no formal parent at all; every other
+                    // type may only select a unit of its contractual parent type.
+                    if ($expectedParentType === null) {
+                        return [];
+                    }
+
+                    return OrganizationUnit::query()
+                        ->where('type', $expectedParentType)
+                        ->whereIn('id', app(OrganizationScope::class)->visibleUnitIds(auth()->user()))
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->all();
+                })
                 ->searchable()
                 ->required(fn (Get $get): bool => $get('type') !== OrganizationUnitType::Provinsi->value)
                 ->visible(fn (Get $get): bool => $get('type') !== OrganizationUnitType::Provinsi->value),

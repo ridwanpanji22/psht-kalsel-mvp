@@ -487,7 +487,7 @@ class PublicUiRenderTest extends TestCase
         OrganizationUnit::factory()->create([
             'name' => 'UKM Kampus',
             'type' => OrganizationUnitType::Ukm,
-            'parent_id' => $province->id,
+            'parent_id' => $branch->id,
             'supervising_branch_id' => $branch->id,
         ]);
 

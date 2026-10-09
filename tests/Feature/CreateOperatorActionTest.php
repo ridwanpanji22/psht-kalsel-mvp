@@ -127,8 +127,8 @@ class CreateOperatorActionTest extends TestCase
         ]);
         $ukm = OrganizationUnit::factory()->create([
             'type' => OrganizationUnitType::Ukm,
-            'parent_id' => $provinsi->id,
-            'supervising_branch_id' => $cabang1->id,
+            'parent_id' => $cabang2->id,
+            'supervising_branch_id' => $cabang2->id,
         ]);
         $actor = User::factory()->create();
         UnitAssignment::factory()->create([

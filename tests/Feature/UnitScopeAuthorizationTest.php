@@ -76,7 +76,18 @@ class UnitScopeAuthorizationTest extends TestCase
         ]);
         $ukm = OrganizationUnit::factory()->create([
             'type' => OrganizationUnitType::Ukm,
-            'parent_id' => $province->id,
+            'parent_id' => $branch->id,
+        ]);
+        $komisariat = OrganizationUnit::factory()->create([
+            'type' => OrganizationUnitType::Komisariat,
+            'parent_id' => $branch->id,
+        ]);
+        // Pembinaan metadata only: this UKM lives in the sibling branch's
+        // formal subtree but names $branch as its supervising branch, so the
+        // $branch operator must not see it through that relation alone.
+        $foreignSupervisedUnit = OrganizationUnit::factory()->create([
+            'type' => OrganizationUnitType::Ukm,
+            'parent_id' => $siblingBranch->id,
             'supervising_branch_id' => $branch->id,
         ]);
         $operator = User::factory()->create();
@@ -87,8 +98,8 @@ class UnitScopeAuthorizationTest extends TestCase
 
         $visibleUnitIds = app(OrganizationScope::class)->visibleUnitIds($operator);
 
-        $this->assertEqualsCanonicalizing([$branch->id, $ranting->id, $rayon->id], $visibleUnitIds);
+        $this->assertEqualsCanonicalizing([$branch->id, $ranting->id, $rayon->id, $ukm->id, $komisariat->id], $visibleUnitIds);
         $this->assertNotContains($siblingBranch->id, $visibleUnitIds);
-        $this->assertNotContains($ukm->id, $visibleUnitIds);
+        $this->assertNotContains($foreignSupervisedUnit->id, $visibleUnitIds);
     }
 }

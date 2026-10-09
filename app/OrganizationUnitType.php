@@ -15,8 +15,8 @@ enum OrganizationUnitType: string
     {
         return match ($this) {
             self::Provinsi => null,
-            self::Cabang, self::Ukm, self::Komisariat => self::Provinsi,
-            self::Ranting => self::Cabang,
+            self::Cabang => self::Provinsi,
+            self::Ranting, self::Ukm, self::Komisariat => self::Cabang,
             self::Rayon => self::Ranting,
         };
     }
