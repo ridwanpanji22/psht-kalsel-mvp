@@ -701,6 +701,23 @@ class DemoDatabaseSeederTest extends TestCase
                 "Gallery category {$category->value} must be represented.",
             );
         }
+
+        // Galleries must be owned by special units (UKM + Komisariat) as well as
+        // branches and rantings.
+        foreach ([
+            OrganizationUnitType::Cabang,
+            OrganizationUnitType::Ranting,
+            OrganizationUnitType::Ukm,
+            OrganizationUnitType::Komisariat,
+        ] as $type) {
+            $unitIds = OrganizationUnit::query()->where('type', $type)->pluck('id');
+
+            $this->assertGreaterThan(
+                0,
+                Gallery::query()->whereIn('organization_unit_id', $unitIds)->count(),
+                "Galleries must cover owner type {$type->value}.",
+            );
+        }
     }
 
     public function test_demo_seed_publication_states_and_published_fields_are_consistent(): void
@@ -738,6 +755,29 @@ class DemoDatabaseSeederTest extends TestCase
                     ->count(),
                 "{$modelClass} must not expose publication fields on non-published rows.",
             );
+
+            // PublishContent::publish() forbids self-approval: the publisher must
+            // never be the submitter, and both actors must hold a valid
+            // assignment (operator) so the seeded review trail is realistic.
+            foreach ($modelClass::query()->where('status', PublicationStatus::Published)->get() as $published) {
+                $this->assertNotNull($published->submitted_by_id, "Published {$modelClass} must have a submitter.");
+                $this->assertNotNull($published->published_by_id, "Published {$modelClass} must have a publisher.");
+                $this->assertNotSame(
+                    $published->submitted_by_id,
+                    $published->published_by_id,
+                    "Published {$modelClass} #{$published->id} must not be self-approved.",
+                );
+
+                foreach ([$published->submitted_by_id, $published->published_by_id] as $actorId) {
+                    $this->assertTrue(
+                        UnitAssignment::query()
+                            ->where('user_id', $actorId)
+                            ->where('is_active', true)
+                            ->exists(),
+                        "Publication actor {$actorId} must hold an active assignment.",
+                    );
+                }
+            }
         }
     }
 
@@ -752,6 +792,17 @@ class DemoDatabaseSeederTest extends TestCase
             Page::query()->whereNull('organization_unit_id')->count(),
             'The general profile and province history must not be unit-scoped.',
         );
+
+        // The public Blade escapes `$page->body`, so a good body must be plain
+        // text and must not embed literal HTML markup.
+        foreach (Page::query()->get() as $page) {
+            $this->assertNotEmpty(trim((string) $page->body), "Page {$page->slug} must have a body.");
+            $this->assertSame(
+                0,
+                preg_match('/<[a-z!\/][^>]*>/i', (string) $page->body),
+                "Page {$page->slug} body must not contain literal HTML tags.",
+            );
+        }
 
         $this->assertSame(
             6,
@@ -865,6 +916,87 @@ class DemoDatabaseSeederTest extends TestCase
         $this->assertSame($eventSlugs, Event::query()->orderBy('id')->pluck('slug')->all(), 'Event slugs must be stable.');
         $this->assertSame($locationSlugs, TrainingLocation::query()->orderBy('id')->pluck('slug')->all(), 'Location slugs must be stable.');
         $this->assertSame($gallerySlugs, Gallery::query()->orderBy('id')->pluck('slug')->all(), 'Gallery slugs must be stable.');
+    }
+
+    public function test_demo_seed_publication_audits_are_scoped_to_seeded_content(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // Every published Page/Event/TrainingLocation/Gallery has exactly one
+        // `content.published` audit whose subject is that seeded record.
+        $subjects = [];
+
+        foreach ([Page::class, Event::class, TrainingLocation::class, Gallery::class] as $modelClass) {
+            $publishedIds = $modelClass::query()
+                ->where('status', PublicationStatus::Published)
+                ->pluck('id')
+                ->all();
+
+            foreach ($publishedIds as $id) {
+                $audit = AuditEvent::query()
+                    ->where('action', 'content.published')
+                    ->where('subject_type', (new $modelClass)->getMorphClass())
+                    ->where('subject_id', $id)
+                    ->first();
+
+                $this->assertNotNull(
+                    $audit,
+                    "Published {$modelClass} #{$id} must have a content.published audit row.",
+                );
+                $this->assertNotNull($audit->actor_id, 'Publication audits must carry an actor.');
+                $this->assertSame($id, $audit->metadata['content_id'] ?? $id, 'Audit metadata must reference the content.');
+                $subjects[] = $audit->subject_type.'#'.$id;
+            }
+        }
+
+        // The only `content.published` audits are the province placeholder plus
+        // the seeded publication records — never an unrelated local row.
+        $seededSubjectTypes = [
+            (new Page)->getMorphClass(),
+            (new Event)->getMorphClass(),
+            (new TrainingLocation)->getMorphClass(),
+            (new Gallery)->getMorphClass(),
+        ];
+
+        $this->assertSame(0, AuditEvent::query()
+            ->where('action', 'content.published')
+            ->whereNotIn('subject_type', $seededSubjectTypes)
+            ->where('metadata->content_type', '!=', 'organization_profile')
+            ->count(), 'content.published audits must only reference seeded publication records.');
+
+        $this->assertSame(
+            count($subjects),
+            count(array_unique($subjects)),
+            'Each seeded publication record must have exactly one publication audit.',
+        );
+    }
+
+    public function test_demo_seed_public_portal_renders_published_content_only(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // Homepage, events, galleries, and locations all render successfully.
+        $this->get(route('public.home'))->assertOk();
+        $this->get(route('public.events.index'))->assertOk();
+        $this->get(route('public.galleries.index'))->assertOk();
+        $this->get(route('public.training-locations.index'))->assertOk();
+
+        // The published profile page renders its plain-text body.
+        $profile = Page::query()->where('status', PublicationStatus::Published)->firstOrFail();
+
+        $this->get(route('public.pages.show', $profile->slug))
+            ->assertOk()
+            ->assertSee($profile->title);
+
+        // A published activity resolves and a non-published activity 404s.
+        $publishedEvent = Event::query()->where('status', PublicationStatus::Published)->firstOrFail();
+        $hiddenEvent = Event::query()->where('status', '!=', PublicationStatus::Published)->firstOrFail();
+
+        $this->get(route('public.events.show', $publishedEvent->slug))->assertOk();
+        $this->get(route('public.events.show', $hiddenEvent->slug))->assertNotFound();
+
+        // Anonymous responses never leak the private cover path.
+        $this->get(route('public.events.index'))->assertDontSee('private/event-covers', false);
     }
 
     /**

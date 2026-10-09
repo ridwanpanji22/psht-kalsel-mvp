@@ -14,6 +14,7 @@ use App\OrganizationUnitType;
 use Database\Seeders\Support\DemoSeedContext;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use LogicException;
 
 /**
  * Seeds the deterministic public content: pages, activities, training
@@ -95,12 +96,13 @@ class DemoPublicationSeeder extends Seeder
     {
         $operatorByUnitId = $this->resolveUnitOperators($context);
         $fallbackOperator = $context->operator('operator-provinsi');
+        $reviewers = $this->resolveReviewers($context);
 
-        DB::transaction(function () use ($context, $operatorByUnitId, $fallbackOperator): void {
-            $this->seedPages($context, $operatorByUnitId, $fallbackOperator);
-            $this->seedEvents($context, $operatorByUnitId, $fallbackOperator);
-            $this->seedTrainingLocations($context, $operatorByUnitId, $fallbackOperator);
-            $this->seedGalleries($context, $operatorByUnitId, $fallbackOperator);
+        DB::transaction(function () use ($context, $operatorByUnitId, $fallbackOperator, $reviewers): void {
+            $this->seedPages($context, $operatorByUnitId, $fallbackOperator, $reviewers);
+            $this->seedEvents($context, $operatorByUnitId, $fallbackOperator, $reviewers);
+            $this->seedTrainingLocations($context, $operatorByUnitId, $fallbackOperator, $reviewers);
+            $this->seedGalleries($context, $operatorByUnitId, $fallbackOperator, $reviewers);
         });
     }
 
@@ -123,12 +125,65 @@ class DemoPublicationSeeder extends Seeder
     }
 
     /**
+     * An ordered pool of active, onboarded operators used as publishers so that
+     * `published_by_id` never equals `submitted_by_id`.
+     *
+     * The pool excludes no one; {@see self::publisherFor()} skips the submitter.
+     * The province operator leads the pool so branch content is reviewed at the
+     * province level, matching the seeded hierarchy.
+     *
+     * @return list<User>
+     */
+    private function resolveReviewers(DemoSeedContext $context): array
+    {
+        $reviewers = [];
+        $seen = [];
+
+        $provinceOperator = $context->operator('operator-provinsi');
+        $reviewers[] = $provinceOperator;
+        $seen[$provinceOperator->id] = true;
+
+        foreach ($context->operators() as $operator) {
+            if (isset($seen[$operator->id])) {
+                continue;
+            }
+
+            $reviewers[] = $operator;
+            $seen[$operator->id] = true;
+        }
+
+        return $reviewers;
+    }
+
+    /**
+     * Pick a deterministic publisher for a submitter, never the submitter.
+     *
+     * @param  list<User>  $reviewers
+     */
+    private function publisherFor(User $submitter, array $reviewers, int $salt = 0): User
+    {
+        $count = count($reviewers);
+
+        for ($offset = 0; $offset < $count; $offset++) {
+            $candidate = $reviewers[($salt + $offset) % $count];
+
+            if ($candidate->id !== $submitter->id) {
+                return $candidate;
+            }
+        }
+
+        // Unreachable with a non-empty pool containing at least two operators.
+        throw new LogicException('Seeder demo memerlukan minimal dua operator untuk review publikasi.');
+    }
+
+    /**
      * Pages: a general organization profile, the province history, and one
      * history per branch for six branches. Branch histories own their branch.
      *
      * @param  array<int, User>  $operatorByUnitId
+     * @param  list<User>  $reviewers
      */
-    private function seedPages(DemoSeedContext $context, array $operatorByUnitId, User $fallback): void
+    private function seedPages(DemoSeedContext $context, array $operatorByUnitId, User $fallback, array $reviewers): void
     {
         $province = $context->province();
         $provinceOperator = $operatorByUnitId[$province->id] ?? $fallback;
@@ -140,7 +195,7 @@ class DemoPublicationSeeder extends Seeder
             unit: null,
             status: PublicationStatus::Published,
             submittedBy: $provinceOperator,
-            publishedBy: $provinceOperator,
+            publishedBy: $this->publisherFor($provinceOperator, $reviewers, 0),
         );
 
         $this->upsertPage(
@@ -150,7 +205,7 @@ class DemoPublicationSeeder extends Seeder
             unit: null,
             status: PublicationStatus::Published,
             submittedBy: $provinceOperator,
-            publishedBy: $provinceOperator,
+            publishedBy: $this->publisherFor($provinceOperator, $reviewers, 1),
         );
 
         $branches = array_values($context->branches());
@@ -173,9 +228,13 @@ class DemoPublicationSeeder extends Seeder
                 unit: $branch,
                 status: $status,
                 submittedBy: $operator,
-                publishedBy: $status === PublicationStatus::Published ? $provinceOperator : null,
+                publishedBy: $status === PublicationStatus::Published
+                    ? $this->publisherFor($operator, $reviewers, $index + 2)
+                    : null,
             );
         }
+
+        $context->putPublicationKeys(Page::class, Page::query()->orderBy('id')->pluck('slug')->all());
     }
 
     private function upsertPage(
@@ -209,8 +268,9 @@ class DemoPublicationSeeder extends Seeder
      * near-future and a fixed past block so `upcoming`/`past` both render.
      *
      * @param  array<int, User>  $operatorByUnitId
+     * @param  list<User>  $reviewers
      */
-    private function seedEvents(DemoSeedContext $context, array $operatorByUnitId, User $fallback): void
+    private function seedEvents(DemoSeedContext $context, array $operatorByUnitId, User $fallback, array $reviewers): void
     {
         $owners = array_values([...$context->branches(), ...$context->rantings()]);
         $ownerCount = count($owners);
@@ -222,6 +282,7 @@ class DemoPublicationSeeder extends Seeder
             $owner = $owners[$index % $ownerCount];
             $operator = $operatorByUnitId[$owner->id] ?? $fallback;
             $status = PublicationStatus::cases()[$index % count(PublicationStatus::cases())];
+            $isPublished = $status === PublicationStatus::Published;
 
             $isUpcoming = $index < $upcomingTotal;
             $dayOffset = $isUpcoming
@@ -234,7 +295,7 @@ class DemoPublicationSeeder extends Seeder
             $title = self::EVENT_TITLES[$index % count(self::EVENT_TITLES)].' '.$owner->name;
             $slug = 'kegiatan-'.str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT).'-'.$this->slugify($owner->name);
 
-            $hasCover = $status === PublicationStatus::Published || $index % 3 === 0;
+            $hasCover = $isPublished || $index % 3 === 0;
 
             Event::query()->updateOrCreate(
                 ['slug' => $slug],
@@ -250,11 +311,15 @@ class DemoPublicationSeeder extends Seeder
                     'cover_alt_text' => $hasCover ? 'Sampul kegiatan '.$title : null,
                     'status' => $status,
                     'submitted_by_id' => $operator->id,
-                    'published_by_id' => $status === PublicationStatus::Published ? $operator->id : null,
-                    'published_at' => $status === PublicationStatus::Published ? self::PUBLISHED_AT : null,
+                    'published_by_id' => $isPublished
+                        ? $this->publisherFor($operator, $reviewers, $index)->id
+                        : null,
+                    'published_at' => $isPublished ? self::PUBLISHED_AT : null,
                 ],
             );
         }
+
+        $context->putPublicationKeys(Event::class, Event::query()->orderBy('id')->pluck('slug')->all());
     }
 
     /**
@@ -262,8 +327,9 @@ class DemoPublicationSeeder extends Seeder
      * Komisariat with deterministic Kalimantan Selatan coordinates.
      *
      * @param  array<int, User>  $operatorByUnitId
+     * @param  list<User>  $reviewers
      */
-    private function seedTrainingLocations(DemoSeedContext $context, array $operatorByUnitId, User $fallback): void
+    private function seedTrainingLocations(DemoSeedContext $context, array $operatorByUnitId, User $fallback, array $reviewers): void
     {
         $owners = array_values([
             ...$context->branches(),
@@ -317,20 +383,29 @@ class DemoPublicationSeeder extends Seeder
                     'status' => $status,
                     'verified_at' => $isVerified ? self::PUBLISHED_AT : null,
                     'submitted_by_id' => $operator->id,
-                    'published_by_id' => $isPublished ? $operator->id : null,
+                    'published_by_id' => $isPublished
+                        ? $this->publisherFor($operator, $reviewers, $index)->id
+                        : null,
                     'published_at' => $isPublished ? self::PUBLISHED_AT : null,
                 ],
             );
         }
+
+        $context->putPublicationKeys(TrainingLocation::class, TrainingLocation::query()->orderBy('id')->pluck('slug')->all());
     }
 
     /**
      * Galleries across branches, rantings, and special units, with all three
      * categories and all four publication states. Media rows are Task 6.
      *
+     * The owner slot list is ordered branch → ranting → special so every UKM
+     * and Komisariat is reachable; the first slots force one owner of each
+     * type so the `ukm` and `komisariat` owner types are provably covered.
+     *
      * @param  array<int, User>  $operatorByUnitId
+     * @param  list<User>  $reviewers
      */
-    private function seedGalleries(DemoSeedContext $context, array $operatorByUnitId, User $fallback): void
+    private function seedGalleries(DemoSeedContext $context, array $operatorByUnitId, User $fallback, array $reviewers): void
     {
         $owners = array_values([
             ...$context->branches(),
@@ -338,6 +413,19 @@ class DemoPublicationSeeder extends Seeder
             ...array_values($context->specialUnits()),
         ]);
         $ownerCount = count($owners);
+
+        // Force one gallery per required owner type into the first slots so the
+        // coverage invariant holds: branch, ranting, UKM, and Komisariat.
+        $forcedOwners = [];
+        foreach ([OrganizationUnitType::Cabang, OrganizationUnitType::Ranting, OrganizationUnitType::Ukm, OrganizationUnitType::Komisariat] as $type) {
+            foreach ($owners as $owner) {
+                if ($owner->type === $type) {
+                    $forcedOwners[] = $owner;
+
+                    break;
+                }
+            }
+        }
 
         $categories = [
             GalleryCategory::Latihan,
@@ -347,10 +435,11 @@ class DemoPublicationSeeder extends Seeder
         $statuses = PublicationStatus::cases();
 
         for ($index = 0; $index < self::GALLERY_TOTAL; $index++) {
-            $owner = $owners[($index * 3) % $ownerCount];
+            $owner = $forcedOwners[$index] ?? $owners[($index * 3) % $ownerCount];
             $operator = $operatorByUnitId[$owner->id] ?? $fallback;
             $category = $categories[$index % count($categories)];
             $status = $statuses[$index % count($statuses)];
+            $isPublished = $status === PublicationStatus::Published;
 
             $title = 'Galeri '.$category->label().' '.$owner->name;
             $slug = 'galeri-'.str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT).'-'.$category->value.'-'.$this->slugify($owner->name);
@@ -364,11 +453,15 @@ class DemoPublicationSeeder extends Seeder
                     'category' => $category,
                     'status' => $status,
                     'submitted_by_id' => $operator->id,
-                    'published_by_id' => $status === PublicationStatus::Published ? $operator->id : null,
-                    'published_at' => $status === PublicationStatus::Published ? self::PUBLISHED_AT : null,
+                    'published_by_id' => $isPublished
+                        ? $this->publisherFor($operator, $reviewers, $index)->id
+                        : null,
+                    'published_at' => $isPublished ? self::PUBLISHED_AT : null,
                 ],
             );
         }
+
+        $context->putPublicationKeys(Gallery::class, Gallery::query()->orderBy('id')->pluck('slug')->all());
     }
 
     private function eventCoverPath(int $index): string
@@ -380,9 +473,11 @@ class DemoPublicationSeeder extends Seeder
 
     private function pageBody(string $title): string
     {
-        return '<p>'.$title.' merupakan naskah sintetis untuk keperluan demo portal PSHT Kalimantan Selatan. '
-            .'Seluruh nama, angka, dan alamat bersifat fiktif dan tidak mewakili data pribadi nyata.</p>'
-            .'<p>Halaman ini disusun agar pengurus dapat meninjau alur publikasi, penyuntingan, dan penyaringan konten publik.</p>';
+        return $title.' merupakan naskah sintetis untuk keperluan demo portal PSHT Kalimantan Selatan. '
+            .'Seluruh nama, angka, dan alamat bersifat fiktif dan tidak mewakili data pribadi nyata.'
+            ."\n\n"
+            .'Halaman ini disusun agar pengurus dapat meninjau alur publikasi, penyuntingan, dan penyaringan konten publik. '
+            .'Teks disimpan sebagai teks biasa agar konsisten dengan tampilan editorial portal.';
     }
 
     private function slugify(string $value): string

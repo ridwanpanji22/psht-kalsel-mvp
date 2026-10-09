@@ -5,8 +5,10 @@ namespace Database\Seeders;
 use App\Enums\PublicationStatus;
 use App\Models\AuditEvent;
 use App\Models\Event;
+use App\Models\Gallery;
 use App\Models\Membership;
 use App\Models\Page;
+use App\Models\TrainingLocation;
 use App\Models\User;
 use Database\Seeders\Support\DemoSeedContext;
 use Illuminate\Database\Seeder;
@@ -39,7 +41,7 @@ class DemoWorkflowSeeder extends Seeder
         DB::transaction(function () use ($context): void {
             $this->seedOperatorAudits($context);
             $this->seedPublicationAudits($context);
-            $this->seedPublishedContentAudits();
+            $this->seedPublishedContentAudits($context);
         });
     }
 
@@ -106,45 +108,55 @@ class DemoWorkflowSeeder extends Seeder
     }
 
     /**
-     * Attach a `content.published` audit row to every published Page and Event
-     * created by {@see DemoPublicationSeeder}, matching what PublishContent
-     * persists. Factored separately from the province-level placeholder so the
-     * Task 4 invariant (subject = province, content_type = organization_profile)
-     * and real publication audits coexist.
+     * Attach a `content.published` audit row to every published Page, Event,
+     * TrainingLocation, and Gallery created by {@see DemoPublicationSeeder},
+     * matching what PublishContent persists.
+     *
+     * The seeded records are identified by the deterministic natural keys the
+     * publication seeder recorded in the shared context, never by an unscoped
+     * `where('status', published)` query, so running the demo seed can never
+     * rewrite the audit history of an unrelated local row.
      */
-    private function seedPublishedContentAudits(): void
+    private function seedPublishedContentAudits(DemoSeedContext $context): void
     {
-        foreach (Page::query()->where('status', PublicationStatus::Published)->get() as $page) {
-            AuditEvent::query()->updateOrCreate(
-                [
-                    'subject_type' => $page->getMorphClass(),
-                    'subject_id' => $page->id,
-                    'action' => 'content.published',
-                ],
-                [
-                    'actor_id' => $page->published_by_id ?? $page->submitted_by_id,
-                    'metadata' => [
-                        'content_type' => 'page',
-                        'slug' => $page->slug,
-                        'published_at' => $page->published_at?->toDateTimeString(),
-                    ],
-                ],
-            );
+        $this->auditPublished(Page::class, 'page', 'slug', $context->publicationKeys(Page::class));
+        $this->auditPublished(Event::class, 'event', 'slug', $context->publicationKeys(Event::class));
+        $this->auditPublished(TrainingLocation::class, 'training_location', 'slug', $context->publicationKeys(TrainingLocation::class));
+        $this->auditPublished(Gallery::class, 'gallery', 'slug', $context->publicationKeys(Gallery::class));
+    }
+
+    /**
+     * Write one `content.published` audit per published seeded record of a
+     * given model, identified by the recorded natural key column.
+     *
+     * @param  class-string  $modelClass
+     * @param  list<string>  $keys
+     */
+    private function auditPublished(string $modelClass, string $contentType, string $keyColumn, array $keys): void
+    {
+        if ($keys === []) {
+            return;
         }
 
-        foreach (Event::query()->where('status', PublicationStatus::Published)->get() as $event) {
+        $records = $modelClass::query()
+            ->whereIn($keyColumn, $keys)
+            ->where('status', PublicationStatus::Published)
+            ->get();
+
+        foreach ($records as $record) {
             AuditEvent::query()->updateOrCreate(
                 [
-                    'subject_type' => $event->getMorphClass(),
-                    'subject_id' => $event->id,
+                    'subject_type' => $record->getMorphClass(),
+                    'subject_id' => $record->id,
                     'action' => 'content.published',
                 ],
                 [
-                    'actor_id' => $event->published_by_id ?? $event->submitted_by_id,
+                    'actor_id' => $record->published_by_id ?? $record->submitted_by_id,
                     'metadata' => [
-                        'content_type' => 'event',
-                        'slug' => $event->slug,
-                        'published_at' => $event->published_at?->toDateTimeString(),
+                        'content_type' => $contentType,
+                        'slug' => $record->{$keyColumn},
+                        'content_id' => $record->id,
+                        'published_at' => $record->published_at?->toDateTimeString(),
                     ],
                 ],
             );
