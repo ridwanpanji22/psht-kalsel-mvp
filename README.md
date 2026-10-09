@@ -42,6 +42,48 @@ A previously exposed service-account key was revoked, and no replacement key or 
 
 This is an environment prerequisite, not a code defect. Tests mock the Firebase boundary and do not require real credentials.
 
+## Demo dataset and local demo login
+
+A deterministic demo dataset powers local presentations without any real identity or
+Firebase credential. It is produced by `DatabaseSeeder` → `DemoDatabaseSeeder` and
+refuses to run when `APP_ENV=production`.
+
+```bash
+php artisan migrate          # on a clean local SQLite/MySQL database
+php artisan db:seed          # seeds the full demo dataset
+```
+
+> **Reset warning:** the seeder never runs `migrate:fresh` and never deletes rows. To
+> re-seed from scratch, reset the demo database explicitly (`php artisan migrate:fresh`
+> **only** on a disposable local database), then `php artisan db:seed` again. Reruns on an
+> already-seeded database update records by natural key instead of duplicating them.
+
+Demo operators (one per organization unit; 1 province + 13 branches + 65 rantings +
+208 rayons + 13 UKM + 13 komisariat = **313 accounts**):
+
+- **Email pattern:** `demo.provinsi@psht-kalsel.test`, `demo.cabang.01@psht-kalsel.test`
+  (through `.13`), `demo.ranting.branch-01-01@psht-kalsel.test`, `demo.rayon.…`,
+  `demo.special-ukm-branch-01@psht-kalsel.test`, and so on.
+- **Shared password:** `PshtKalsel@1922` (local demo only — never use in production).
+- Every account is active, onboarded, carries a unique dummy `firebase_uid`, and has an
+  active assignment on its unit.
+
+Because the dummy Firebase UIDs cannot authenticate against real Firebase, the server
+exposes a guarded, password-based demo login for local presentation. It is **disabled by
+default** and only honoured when both conditions hold:
+
+```dotenv
+APP_ENV=local            # or testing
+DEMO_AUTH_ENABLED=true   # default is false
+```
+
+When enabled, a visibly labelled **Demo lokal** form is rendered under the Firebase form on
+`/admin/login` and posts to `/admin/demo/auth/session`. When disabled, or in any
+non-local/testing environment (including production), the endpoint returns `404` and the
+form is not rendered. Firebase login and token verification are never modified; production
+login stays Firebase-only. Failed demo logins return a uniform validation error so callers
+cannot probe which accounts exist.
+
 ## Verification
 
 ```bash

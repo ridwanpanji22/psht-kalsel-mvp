@@ -30,6 +30,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Local Demo Authentication
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the application exposes a password-based session endpoint so
+    | seeded demo operators (which carry dummy Firebase UIDs that cannot
+    | authenticate against real Firebase) can sign in during local presentations.
+    | It is honoured only in "local" or "testing" environments and MUST stay
+    | false in staging/production. The endpoint returns 404 whenever it is not
+    | explicitly enabled.
+    |
+    */
+
+    'demo_auth_enabled' => (bool) env('DEMO_AUTH_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Debug Mode
     |--------------------------------------------------------------------------
     |

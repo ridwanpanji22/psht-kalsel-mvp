@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\ApprovalDecisionController;
+use App\Http\Controllers\Auth\DemoAuthSessionController;
 use App\Http\Controllers\Auth\FirebaseAuthActivationController;
 use App\Http\Controllers\Auth\FirebaseAuthSessionController;
 use App\Http\Controllers\PrivateMediaController;
@@ -31,6 +32,12 @@ Route::get('/admin/activate', fn () => view('auth.activate'))->name('auth.activa
 Route::post('/admin/auth/session', FirebaseAuthSessionController::class)
     ->middleware('throttle:5,1')
     ->name('auth.firebase.session');
+
+// Local-only demo login. The controller returns 404 unless DEMO_AUTH_ENABLED is
+// true in a local/testing environment, so the route is inert in production.
+Route::post('/admin/demo/auth/session', DemoAuthSessionController::class)
+    ->middleware('throttle:5,1')
+    ->name('auth.demo.session');
 Route::post('/admin/auth/activate', FirebaseAuthActivationController::class)
     ->middleware('throttle:5,1')
     ->name('auth.firebase.activate');

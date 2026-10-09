@@ -26,5 +26,6 @@ class DemoDatabaseSeeder extends Seeder
         $context = new DemoSeedContext;
 
         $this->callWith(DemoOrganizationSeeder::class, ['context' => $context]);
+        $this->callWith(DemoOperatorSeeder::class, ['context' => $context]);
     }
 }

@@ -91,6 +91,36 @@
 
                 {!! FilamentView::renderHook(PanelsRenderHook::AUTH_LOGIN_FORM_AFTER, scopes: $this->getRenderHookScopes()) !!}
 
+                @if (config('app.demo_auth_enabled') && app()->environment(['local', 'testing']))
+                    <section data-demo-login class="login-shell__demo" aria-labelledby="demo-login-heading">
+                        <p class="login-shell__demo-badge">Demo lokal</p>
+                        <h2 id="demo-login-heading">Masuk demo lokal</h2>
+                        <p>Hanya untuk presentasi lokal. Akun operator demo memakai kata sandi bersama dan tidak dapat dipakai di production.</p>
+
+                        @if ($errors->any())
+                            <p class="login-shell__demo-error" role="alert">{{ $errors->first() }}</p>
+                        @endif
+
+                        <form id="demo-login-form" class="login-shell__form" method="POST" action="{{ route('auth.demo.session') }}">
+                            @csrf
+
+                            <div class="login-shell__field">
+                                <label for="demo-email">Email demo</label>
+                                <input id="demo-email" name="email" type="email" required autocomplete="off" value="{{ old('email') }}" placeholder="demo.cabang.01@psht-kalsel.test">
+                            </div>
+
+                            <div class="login-shell__field">
+                                <label for="demo-password">Kata Sandi Demo</label>
+                                <input id="demo-password" name="password" type="password" required autocomplete="off" placeholder="PshtKalsel@1922">
+                            </div>
+
+                            <button type="submit" id="demo-login-submit" class="login-shell__button login-shell__button--primary">
+                                Masuk Demo
+                            </button>
+                        </form>
+                    </section>
+                @endif
+
                 <script>
                     window._FIREBASE_CONFIG = {
                         apiKey: @json($firebaseConfig['api_key'] ?? null),
