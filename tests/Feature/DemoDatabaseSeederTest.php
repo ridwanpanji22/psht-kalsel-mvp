@@ -31,8 +31,11 @@ use App\Policies\PagePolicy;
 use App\Policies\TrainingLocationPolicy;
 use App\Support\SafeStoragePath;
 use Database\Seeders\DemoDatabaseSeeder;
+use Database\Seeders\DemoMediaSeeder;
 use Database\Seeders\DemoMembershipSeeder;
 use Database\Seeders\DemoPublicationSeeder;
+use Database\Seeders\Support\DemoSeedContext;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
@@ -41,6 +44,9 @@ use Tests\TestCase;
 class DemoDatabaseSeederTest extends TestCase
 {
     use LazilyRefreshDatabase;
+
+    /** 26 galleries x 4 media rows. */
+    private const MEDIA_ROWS = 104;
 
     public function test_demo_seed_creates_required_organization_shape(): void
     {
@@ -1051,6 +1057,54 @@ class DemoDatabaseSeederTest extends TestCase
         );
     }
 
+    public function test_demo_seed_media_is_scoped_to_seeded_galleries_and_events(): void
+    {
+        // Plant unrelated galleries and events BEFORE seeding. The media seeder
+        // must never attach media rows to them or write files under their keys.
+        $foreignUnit = OrganizationUnit::factory()->create([
+            'name' => 'Unit Asing Media',
+            'type' => OrganizationUnitType::Cabang,
+        ]);
+
+        $foreignGallery = Gallery::factory()->create([
+            'slug' => 'galeri-99-latihan-unit-asing',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $foreignUnit->id,
+        ]);
+        $foreignEvent = Event::factory()->create([
+            'slug' => 'kegiatan-asing-bersampul',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $foreignUnit->id,
+            'cover_path' => 'private/event-covers/demo/kegiatan-asing.jpg',
+            'cover_alt_text' => 'Sampul asing',
+        ]);
+
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // No media row ever references an unrelated gallery.
+        $this->assertSame(
+            0,
+            Media::query()->where('gallery_id', $foreignGallery->id)->count(),
+            'An unrelated gallery must never receive seeded media rows.',
+        );
+
+        // The unrelated event keeps its metadata and its cover file is never written.
+        $this->assertSame('private/event-covers/demo/kegiatan-asing.jpg', $foreignEvent->refresh()->cover_path);
+        $this->assertFalse(
+            Storage::disk('local')->exists('private/event-covers/demo/kegiatan-asing.jpg'),
+            'An unrelated event cover path must never be materialised by the demo seeder.',
+        );
+        $this->assertFalse(
+            Storage::disk('local')->exists('private/gallery-media/demo/99/media-1.png'),
+            'No storage directory may be created for an unrelated gallery key.',
+        );
+    }
+
     public function test_demo_seed_publishers_are_in_scope_and_distinct_from_submitters(): void
     {
         $this->seed(DemoDatabaseSeeder::class);
@@ -1217,7 +1271,7 @@ class DemoDatabaseSeederTest extends TestCase
 
         $this->assertSame(26, Gallery::query()->count(), 'Exactly 26 galleries must exist.');
         $this->assertSame(
-            104,
+            self::MEDIA_ROWS,
             Media::query()->count(),
             'Every gallery carries exactly four media rows: 26 x 4 = 104.',
         );
@@ -1333,18 +1387,29 @@ class DemoDatabaseSeederTest extends TestCase
             if ($media->is_public) {
                 // Public album media is copied into the public tree, so the
                 // private original must have been released by the lifecycle.
+                // A sibling private row of the same gallery proves the path
+                // shape below is the one the seeder actually writes.
+                $privateSibling = $media->gallery->media()->where('is_public', false)->first();
+
+                if ($privateSibling !== null) {
+                    $this->assertTrue(
+                        Storage::disk('local')->exists((string) $privateSibling->path),
+                        "Private media #{$privateSibling->id} file must exist so the released-original check is meaningful.",
+                    );
+                }
+
                 $this->assertFalse(
                     Storage::disk('local')->exists(
-                        SafeStoragePath::GALLERY_MEDIA_PREFIX.$this->galleryKeyFor($media->gallery->slug).'/'.$this->mediaFilename($media),
+                        SafeStoragePath::GALLERY_MEDIA_PREFIX.'demo/'.$this->galleryKeyFor($media->gallery->slug).'/'.$this->mediaFilename($media),
                     ),
-                    "Public media #{$media->id} must not retain a private original.",
+                    "Public media #{$media->id} must not retain a private original at its demo gallery path.",
                 );
             }
 
             $checked++;
         }
 
-        $this->assertSame(104, $checked, 'Every seeded media row must be verified against real storage.');
+        $this->assertSame(self::MEDIA_ROWS, $checked, 'Every seeded media row must be verified against real storage.');
     }
 
     public function test_demo_seed_event_cover_files_exist_for_filled_paths(): void
@@ -1373,7 +1438,219 @@ class DemoDatabaseSeederTest extends TestCase
                 ['image/jpeg', 'image/png', 'image/webp'],
                 "Event {$event->slug} cover must be a real still image.",
             );
+
+            // The stored bytes must match the path extension: a `.jpg` path may
+            // never contain PNG/WebP bytes, and a `.webp` path may never contain
+            // JPEG/PNG bytes.
+            $extension = strtolower(pathinfo((string) $event->cover_path, PATHINFO_EXTENSION));
+            $expectedMime = match ($extension) {
+                'jpg', 'jpeg' => 'image/jpeg',
+                'png' => 'image/png',
+                'webp' => 'image/webp',
+                default => null,
+            };
+
+            $this->assertNotNull($expectedMime, "Event {$event->slug} cover extension must be an allowed image type.");
+            $this->assertSame(
+                $expectedMime,
+                $mimeType,
+                "Event {$event->slug} cover content must match its .{$extension} extension.",
+            );
         }
+    }
+
+    public function test_demo_seed_reconciles_stale_demo_media_and_covers_on_rerun(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        // First run: full demo dataset, so real demo rows/files exist.
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // Snapshot a gallery and an event that the publication seeder seeded.
+        $gallery = Gallery::query()->where('status', PublicationStatus::Published)->firstOrFail();
+        $event = Event::query()->whereNotNull('cover_path')->firstOrFail();
+
+        // A stale demo row/file that is no longer owned by any seeded key, plus
+        // an unrelated hand-managed file that must survive.
+        $staleLocalPath = 'private/gallery-media/demo/999/media-1.png';
+        $stalePublicPath = 'public/gallery-media/demo/999/media-1.png';
+        $staleCoverPath = 'private/event-covers/demo/kegiatan-999.jpg';
+
+        Storage::disk('local')->put($staleLocalPath, 'stale');
+        Storage::disk('public')->put($stalePublicPath, 'stale');
+        Storage::disk('local')->put($staleCoverPath, 'stale');
+        Storage::disk('local')->put('private/gallery-media/manual-keep.png', 'keep');
+        Storage::disk('public')->put('public/gallery-media/manual-keep.png', 'keep');
+
+        $foreignUnit = OrganizationUnit::factory()->create([
+            'name' => 'Unit Usang',
+            'type' => OrganizationUnitType::Cabang,
+        ]);
+        $staleGallery = Gallery::factory()->create([
+            'slug' => 'galeri-999-latihan-unit-usang',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $foreignUnit->id,
+        ]);
+        Media::query()->create([
+            'gallery_id' => $staleGallery->id,
+            'organization_unit_id' => $foreignUnit->id,
+            'disk' => 'local',
+            'path' => $staleLocalPath,
+            'mime_type' => 'image/png',
+            'size' => 5,
+            'alt_text' => 'Media usang',
+            'is_public' => false,
+            'sort_order' => 1,
+        ]);
+
+        // Drive the media seeder with a context that (a) no longer lists the
+        // stale gallery/event and (b) lists the tracked gallery as draft, so the
+        // previously-public lead row/file must be reconciled away.
+        $gallery->update(['status' => PublicationStatus::Draft, 'published_by_id' => null, 'published_at' => null]);
+
+        $context = new DemoSeedContext;
+        $context->putPublicationKeys(Gallery::class, [$gallery->slug]);
+        $context->putPublicationKeys(Event::class, []);
+
+        app(DemoMediaSeeder::class)->run($context);
+
+        // Stale demo row + files and stale cover are gone.
+        $this->assertSame(0, Media::query()->where('gallery_id', $staleGallery->id)->count(), 'Stale demo media row must be removed.');
+        Storage::disk('local')->assertMissing($staleLocalPath);
+        Storage::disk('public')->assertMissing($stalePublicPath);
+        Storage::disk('local')->assertMissing($staleCoverPath);
+
+        // The tracked gallery no longer carries public media, and its public
+        // lead file has been reconciled away.
+        $this->assertSame(
+            0,
+            Media::query()->where('gallery_id', $gallery->id)->where('is_public', true)->count(),
+            'A gallery that stopped being published must not keep public media.',
+        );
+        Storage::disk('public')->assertMissing('public/gallery-media/demo/'.$this->galleryKeyFor($gallery->slug).'/media-1.png');
+
+        // The tracked event's cover is now stale (event key set empty) and gone.
+        Storage::disk('local')->assertMissing((string) $event->cover_path);
+
+        // Unrelated hand-managed files survive untouched.
+        Storage::disk('local')->assertExists('private/gallery-media/manual-keep.png');
+        Storage::disk('public')->assertExists('public/gallery-media/manual-keep.png');
+    }
+
+    public function test_demo_seed_reconciles_media_when_gallery_drops_out_of_the_key_set(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        // First run with two tracked galleries.
+        $unit = OrganizationUnit::factory()->create([
+            'name' => 'Cabang Rekonsiliasi',
+            'type' => OrganizationUnitType::Cabang,
+        ]);
+        $keep = Gallery::factory()->create([
+            'slug' => 'galeri-01-latihan-cabang-rekonsiliasi',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $unit->id,
+        ]);
+        $drop = Gallery::factory()->create([
+            'slug' => 'galeri-02-kegiatan-cabang-rekonsiliasi',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $unit->id,
+        ]);
+
+        $firstContext = new DemoSeedContext;
+        $firstContext->putPublicationKeys(Gallery::class, [$keep->slug, $drop->slug]);
+        $firstContext->putPublicationKeys(Event::class, []);
+        app(DemoMediaSeeder::class)->run($firstContext);
+
+        $this->assertSame(8, Media::query()->count());
+        Storage::disk('public')->assertExists('public/gallery-media/demo/2/media-1.png');
+        Storage::disk('local')->assertExists('private/gallery-media/demo/2/media-2.png');
+
+        // Second run where the second gallery is no longer seeded.
+        $secondContext = new DemoSeedContext;
+        $secondContext->putPublicationKeys(Gallery::class, [$keep->slug]);
+        $secondContext->putPublicationKeys(Event::class, []);
+        app(DemoMediaSeeder::class)->run($secondContext);
+
+        // The dropped gallery's rows/files are gone; the kept gallery survives.
+        $this->assertSame(0, Media::query()->where('gallery_id', $drop->id)->count());
+        Storage::disk('local')->assertMissing('private/gallery-media/demo/2/media-2.png');
+        Storage::disk('public')->assertMissing('public/gallery-media/demo/2/media-1.png');
+        $this->assertSame(4, Media::query()->where('gallery_id', $keep->id)->count());
+        $this->assertSame(4, Media::query()->count());
+    }
+
+    public function test_demo_seed_compensates_when_media_storage_write_fails(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        // Make the public disk fail every write, so the public copy of the
+        // first published gallery's lead image cannot be written.
+        $this->failPublicDiskWrites();
+
+        try {
+            $this->seed(DemoDatabaseSeeder::class);
+            $this->fail('Seeding must fail loudly when a media write is refused.');
+        } catch (\RuntimeException) {
+            // Expected: the seeder surfaces the storage failure.
+        } finally {
+            Storage::set('public', null);
+            Storage::fake('public');
+        }
+
+        // No media rows survive the failed run (single transaction rolled back)
+        // and no orphan files were left behind on either disk.
+        $this->assertSame(
+            0,
+            Media::query()->count(),
+            'A failed media seed must not leave committed media rows.',
+        );
+        $this->assertSame(
+            [],
+            Storage::disk('local')->allFiles(),
+            'A failed media seed must not leave orphan private files.',
+        );
+        $this->assertSame(
+            [],
+            Storage::disk('public')->allFiles(),
+            'A failed media seed must not leave orphan public files.',
+        );
+
+        // A subsequent clean run still produces the full dataset.
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $this->assertSame(self::MEDIA_ROWS, Media::query()->count());
+    }
+
+    /**
+     * Replace the `public` disk with a wrapper whose writes always return false,
+     * mirroring a real disk configured with `throw => false` refusing a write.
+     */
+    private function failPublicDiskWrites(): void
+    {
+        /** @var FilesystemAdapter $original */
+        $original = Storage::disk('public');
+
+        $wrapper = new class($original) extends FilesystemAdapter
+        {
+            public function __construct(FilesystemAdapter $inner)
+            {
+                parent::__construct($inner->getDriver(), $inner->getAdapter(), $inner->getConfig());
+            }
+
+            public function put($path, $contents, $options = [])
+            {
+                return false;
+            }
+        };
+
+        Storage::set('public', $wrapper);
     }
 
     /**
