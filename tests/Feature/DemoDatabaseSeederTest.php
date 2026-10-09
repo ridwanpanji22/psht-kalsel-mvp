@@ -11,6 +11,7 @@ use App\Models\ApprovalRequest;
 use App\Models\AuditEvent;
 use App\Models\Event;
 use App\Models\Gallery;
+use App\Models\Media;
 use App\Models\Membership;
 use App\Models\MembershipStatusHistory;
 use App\Models\OrganizationPosition;
@@ -31,8 +32,10 @@ use App\Policies\TrainingLocationPolicy;
 use App\Support\SafeStoragePath;
 use Database\Seeders\DemoDatabaseSeeder;
 use Database\Seeders\DemoMembershipSeeder;
+use Database\Seeders\DemoPublicationSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class DemoDatabaseSeederTest extends TestCase
@@ -1199,6 +1202,197 @@ class DemoDatabaseSeederTest extends TestCase
         if ($unverified !== null) {
             $this->get(route('public.training-locations.show', $unverified->slug))->assertNotFound();
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Media storage invariants (Task 6)
+    // ---------------------------------------------------------------------
+
+    public function test_demo_seed_creates_exactly_four_image_media_per_gallery(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $this->assertSame(26, Gallery::query()->count(), 'Exactly 26 galleries must exist.');
+        $this->assertSame(
+            104,
+            Media::query()->count(),
+            'Every gallery carries exactly four media rows: 26 x 4 = 104.',
+        );
+
+        foreach (Gallery::query()->with('media')->get() as $gallery) {
+            $this->assertCount(
+                4,
+                $gallery->media,
+                "Gallery {$gallery->slug} must own exactly four media rows.",
+            );
+        }
+    }
+
+    public function test_demo_seed_media_rows_carry_valid_image_metadata(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $videoExtensions = ['mp4', 'mov', 'webm', 'avi', 'mkv', 'm4v'];
+
+        foreach (Media::query()->get() as $media) {
+            $this->assertNotEmpty(
+                trim((string) $media->alt_text),
+                "Media #{$media->id} must have non-empty alt text.",
+            );
+            $this->assertContains(
+                $media->mime_type,
+                ['image/jpeg', 'image/png', 'image/webp'],
+                "Media #{$media->id} mime type must be an allowed still image.",
+            );
+            $this->assertGreaterThan(
+                0,
+                $media->size,
+                "Media #{$media->id} must record a positive size.",
+            );
+
+            $extension = strtolower(pathinfo((string) $media->path, PATHINFO_EXTENSION));
+            $this->assertNotContains(
+                $extension,
+                $videoExtensions,
+                "Media #{$media->id} path must never be a video file.",
+            );
+        }
+
+        // Sort order is unique and dense within each gallery (1..4).
+        foreach (Gallery::query()->with('media')->get() as $gallery) {
+            $sortOrders = $gallery->media->pluck('sort_order')->all();
+            $this->assertSame(
+                [1, 2, 3, 4],
+                collect($sortOrders)->sort()->values()->all(),
+                "Gallery {$gallery->slug} media sort order must be unique and dense.",
+            );
+        }
+    }
+
+    public function test_demo_seed_media_disk_and_visibility_are_consistent(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        foreach (Media::query()->get() as $media) {
+            if ($media->is_public) {
+                $this->assertSame('public', $media->disk, "Public media #{$media->id} must live on the public disk.");
+                $this->assertStringStartsWith(
+                    'public/gallery-media/',
+                    (string) $media->path,
+                    "Public media #{$media->id} must use the public gallery prefix.",
+                );
+            } else {
+                $this->assertSame('local', $media->disk, "Private media #{$media->id} must live on the local disk.");
+                $this->assertTrue(
+                    SafeStoragePath::isSafe((string) $media->path, [SafeStoragePath::GALLERY_MEDIA_PREFIX]),
+                    "Private media #{$media->id} must be a safe private/gallery-media path.",
+                );
+            }
+        }
+
+        // Public media may only belong to a published gallery; private media is
+        // expected somewhere too so both branches of the contract are exercised.
+        $this->assertSame(
+            0,
+            Media::query()
+                ->where('is_public', true)
+                ->whereHas('gallery', fn ($query) => $query->where('status', '!=', PublicationStatus::Published))
+                ->count(),
+            'Public media must only belong to published galleries.',
+        );
+        $this->assertGreaterThan(0, Media::query()->where('is_public', true)->count(), 'Some media must be public.');
+        $this->assertGreaterThan(0, Media::query()->where('is_public', false)->count(), 'Some media must stay private.');
+    }
+
+    public function test_demo_seed_media_files_exist_on_their_recorded_disks(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $checked = 0;
+
+        foreach (Media::query()->get() as $media) {
+            $disk = Storage::disk($media->disk);
+
+            $this->assertTrue(
+                $disk->exists((string) $media->path),
+                "Media #{$media->id} file [{$media->path}] must exist on its {$media->disk} disk.",
+            );
+
+            if ($media->is_public) {
+                // Public album media is copied into the public tree, so the
+                // private original must have been released by the lifecycle.
+                $this->assertFalse(
+                    Storage::disk('local')->exists(
+                        SafeStoragePath::GALLERY_MEDIA_PREFIX.$this->galleryKeyFor($media->gallery->slug).'/'.$this->mediaFilename($media),
+                    ),
+                    "Public media #{$media->id} must not retain a private original.",
+                );
+            }
+
+            $checked++;
+        }
+
+        $this->assertSame(104, $checked, 'Every seeded media row must be verified against real storage.');
+    }
+
+    public function test_demo_seed_event_cover_files_exist_for_filled_paths(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $withCover = Event::query()->whereNotNull('cover_path')->get();
+        $this->assertGreaterThan(0, $withCover->count(), 'Some activities must carry a cover path.');
+
+        foreach ($withCover as $event) {
+            $this->assertTrue(
+                SafeStoragePath::isSafe((string) $event->cover_path, [SafeStoragePath::EVENT_COVER_PREFIX]),
+                "Event {$event->slug} cover must be a safe private/event-covers path.",
+            );
+            $this->assertTrue(
+                Storage::disk('local')->exists((string) $event->cover_path),
+                "Event {$event->slug} cover file must exist on the local disk.",
+            );
+
+            $mimeType = Storage::disk('local')->mimeType((string) $event->cover_path);
+            $this->assertContains(
+                $mimeType,
+                ['image/jpeg', 'image/png', 'image/webp'],
+                "Event {$event->slug} cover must be a real still image.",
+            );
+        }
+    }
+
+    /**
+     * The deterministic gallery key used inside seeded storage paths.
+     * Mirrors the numbering convention in {@see DemoPublicationSeeder}.
+     */
+    private function galleryKeyFor(string $slug): int
+    {
+        preg_match('/^galeri-(\d+)-/', $slug, $matches);
+
+        return (int) ($matches[1] ?? 0);
+    }
+
+    /**
+     * The basename of a media record's storage path.
+     */
+    private function mediaFilename(Media $media): string
+    {
+        return basename((string) $media->path);
     }
 
     /**

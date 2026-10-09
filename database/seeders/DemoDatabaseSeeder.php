@@ -29,6 +29,7 @@ class DemoDatabaseSeeder extends Seeder
         $this->callWith(DemoOperatorSeeder::class, ['context' => $context]);
         $this->callWith(DemoMembershipSeeder::class, ['context' => $context]);
         $this->callWith(DemoPublicationSeeder::class, ['context' => $context]);
+        $this->callWith(DemoMediaSeeder::class, ['context' => $context]);
         $this->callWith(DemoWorkflowSeeder::class, ['context' => $context]);
     }
 }
