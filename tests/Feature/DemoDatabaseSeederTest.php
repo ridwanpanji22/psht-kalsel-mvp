@@ -11,6 +11,7 @@ use App\Models\Membership;
 use App\Models\MembershipStatusHistory;
 use App\Models\OrganizationPosition;
 use App\Models\OrganizationUnit;
+use App\Models\Person;
 use App\Models\UnitAssignment;
 use App\Models\User;
 use App\OrganizationUnitType;
@@ -18,6 +19,7 @@ use App\Policies\ApprovalRequestPolicy;
 use App\Policies\MembershipPolicy;
 use App\Policies\MembershipStatusHistoryPolicy;
 use Database\Seeders\DemoDatabaseSeeder;
+use Database\Seeders\DemoMembershipSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
@@ -109,14 +111,6 @@ class DemoDatabaseSeederTest extends TestCase
             $this->assertNotNull($operator->firebase_uid, 'Every operator needs a dummy Firebase UID.');
             $this->assertStringStartsWith('demo-', (string) $operator->firebase_uid, 'Dummy UIDs must use the demo- prefix.');
 
-            $this->assertTrue(
-                UnitAssignment::query()
-                    ->where('user_id', $operator->id)
-                    ->where('is_active', true)
-                    ->exists(),
-                "Operator {$operator->email} must have at least one active assignment.",
-            );
-
             $uids[] = $operator->firebase_uid;
         }
 
@@ -125,6 +119,39 @@ class DemoDatabaseSeederTest extends TestCase
             count(array_unique($uids)),
             'Every dummy Firebase UID must be unique.',
         );
+
+        // Exactly one active operator-role assignment for every generated unit.
+        $unitIds = OrganizationUnit::query()->pluck('id')->all();
+        $this->assertCount(313, $unitIds, 'The demo tree must contain 313 units.');
+
+        $assignments = UnitAssignment::query()
+            ->where('role', 'operator')
+            ->where('is_active', true)
+            ->get()
+            ->groupBy('organization_unit_id');
+
+        $this->assertCount(
+            313,
+            $assignments,
+            'Every generated unit must have exactly one active operator assignment.',
+        );
+
+        foreach ($unitIds as $unitId) {
+            $this->assertArrayHasKey((string) $unitId, $assignments->all(), "Unit {$unitId} has no active operator assignment.");
+            $this->assertCount(1, $assignments[$unitId], "Unit {$unitId} must have exactly one active operator assignment.");
+        }
+
+        // No stray assignments: every active assignment references a seeded unit
+        // AND a seeded operator-role user, and there are exactly 313 of them.
+        $activeAssignments = UnitAssignment::query()->where('is_active', true)->get();
+        $this->assertCount(313, $activeAssignments, 'There must be exactly 313 active assignments (no strays).');
+
+        $seededUserIds = $operators->pluck('id')->all();
+        foreach ($activeAssignments as $assignment) {
+            $this->assertContains($assignment->organization_unit_id, $unitIds, 'Assignments must reference seeded units.');
+            $this->assertContains($assignment->user_id, $seededUserIds, 'Assignments must reference seeded operators.');
+            $this->assertSame('operator', $assignment->role, 'Seeded assignments must use the operator role.');
+        }
     }
 
     public function test_demo_seed_covers_all_six_unit_types_with_operators(): void
@@ -144,16 +171,26 @@ class DemoDatabaseSeederTest extends TestCase
         }
     }
 
-    public function test_demo_seed_uses_the_shared_demo_password(): void
+    public function test_demo_seed_uses_the_shared_demo_password_for_every_operator(): void
     {
         $this->seed(DemoDatabaseSeeder::class);
 
-        $operator = User::query()->firstOrFail();
+        $operators = User::query()->get();
 
-        $this->assertTrue(
-            Hash::check('PshtKalsel@1922', $operator->password),
-            'Seeded operators must authenticate with the shared demo password.',
-        );
+        $this->assertGreaterThan(0, $operators->count());
+
+        foreach ($operators as $operator) {
+            $this->assertTrue(
+                Hash::check('PshtKalsel@1922', $operator->password),
+                "Operator {$operator->email} must authenticate with the shared demo password.",
+            );
+
+            $this->assertNotSame(
+                'PshtKalsel@1922',
+                $operator->password,
+                'The raw demo password must never be stored verbatim.',
+            );
+        }
     }
 
     public function test_demo_seed_creates_public_and_private_organization_positions(): void
@@ -214,6 +251,51 @@ class DemoDatabaseSeederTest extends TestCase
         (new DemoDatabaseSeeder)->run();
     }
 
+    public function test_demo_seed_is_rejected_when_a_foreign_province_root_exists(): void
+    {
+        // A foreign province root with a child, created before seeding.
+        $foreignProvince = OrganizationUnit::query()->create([
+            'name' => 'Pengurus Provinsi Lain',
+            'type' => OrganizationUnitType::Provinsi,
+            'parent_id' => null,
+            'is_active' => true,
+        ]);
+        $foreignChild = OrganizationUnit::query()->create([
+            'name' => 'Cabang Asing',
+            'type' => OrganizationUnitType::Cabang,
+            'parent_id' => $foreignProvince->id,
+            'is_active' => true,
+        ]);
+
+        $unitsBefore = OrganizationUnit::query()->count();
+        $usersBefore = User::query()->count();
+
+        $this->withoutMockingConsoleOutput();
+
+        try {
+            (new DemoDatabaseSeeder)->run();
+            $this->fail('Seeding must be rejected when a foreign province root already exists.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('provinsi', $exception->getMessage(), 'The rejection must explain the province conflict.');
+        }
+
+        // No demo writes occurred, and the foreign rows are provably untouched.
+        $this->assertSame($unitsBefore, OrganizationUnit::query()->count(), 'No demo units may be created.');
+        $this->assertSame($usersBefore, User::query()->count(), 'No demo operators may be created.');
+        $this->assertSame(0, UnitAssignment::query()->count(), 'No demo assignments may be created.');
+
+        $this->assertDatabaseHas('organization_units', [
+            'id' => $foreignProvince->id,
+            'name' => 'Pengurus Provinsi Lain',
+            'parent_id' => null,
+        ]);
+        $this->assertDatabaseHas('organization_units', [
+            'id' => $foreignChild->id,
+            'name' => 'Cabang Asing',
+            'parent_id' => $foreignProvince->id,
+        ]);
+    }
+
     public function test_demo_seed_creates_membership_distribution_invariants(): void
     {
         $this->seed(DemoDatabaseSeeder::class);
@@ -223,6 +305,28 @@ class DemoDatabaseSeederTest extends TestCase
         foreach (MembershipType::cases() as $type) {
             $this->assertGreaterThan(0, Membership::query()->where('type', $type)->count(), "Membership type {$type->value} must be represented.");
         }
+
+        // Base creation ratio is 60% siswa / 40% warga. Ten approved
+        // conversions move siswa -> warga, so allow a bounded drift.
+        $siswaCount = Membership::query()->where('type', MembershipType::Siswa)->count();
+        $wargaCount = Membership::query()->where('type', MembershipType::Warga)->count();
+        $wargaShare = $wargaCount / 1800;
+
+        $this->assertGreaterThanOrEqual(
+            0.38,
+            $wargaShare,
+            'Warga share must stay near the 40% creation target after conversions.',
+        );
+        $this->assertLessThanOrEqual(
+            0.45,
+            $wargaShare,
+            'Warga share must not drift materially above 40%.',
+        );
+        $this->assertGreaterThanOrEqual(
+            0.55,
+            $siswaCount / 1800,
+            'Siswa share must stay near the 60% creation target.',
+        );
 
         foreach (OrganizationUnitType::cases() as $unitType) {
             $unitIds = OrganizationUnit::query()->where('type', $unitType)->pluck('id');
@@ -238,12 +342,18 @@ class DemoDatabaseSeederTest extends TestCase
             $this->assertGreaterThan(0, Membership::query()->where('status', $status)->count(), "Membership status {$status->value} must be represented.");
         }
 
-        // Member numbers: unique and non-null for warga, always null for siswa.
-        $warga = Membership::query()->where('type', MembershipType::Warga)->get();
-        $this->assertGreaterThan(0, $warga->count(), 'There must be warga memberships.');
-        $this->assertNotNull($warga->whereNull('member_number')->first() === null, 'Every warga must have a member number.');
+        // Member numbers: exactly the warga carry a unique non-null number;
+        // siswa never carry one.
+        $wargaWithNumber = Membership::query()
+            ->where('type', MembershipType::Warga)
+            ->whereNotNull('member_number')
+            ->count();
+        $this->assertSame($wargaCount, $wargaWithNumber, 'Every warga membership must have a member number.');
 
-        $wargaNumbers = $warga->pluck('member_number')->all();
+        $wargaNumbers = Membership::query()
+            ->where('type', MembershipType::Warga)
+            ->pluck('member_number')
+            ->all();
         $this->assertSame(count($wargaNumbers), count(array_unique($wargaNumbers)), 'Warga member numbers must be unique.');
 
         $this->assertSame(
@@ -268,9 +378,14 @@ class DemoDatabaseSeederTest extends TestCase
 
             // The warga conversion record is a *type* change, not a status
             // transition: ApproveWargaConversion writes from_status == to_status
-            // on purpose. Every other row must be an enum-valid transition.
+            // to match the membership's actual status at approval time.
             if ($history->reason === 'warga_conversion_approved') {
                 $this->assertSame($history->from_status, $history->to_status);
+                $this->assertSame(
+                    MembershipType::Warga,
+                    $history->membership->type,
+                    'A conversion history row must belong to a warga membership.',
+                );
 
                 continue;
             }
@@ -282,6 +397,18 @@ class DemoDatabaseSeederTest extends TestCase
                 );
             }
         }
+
+        // A deterministic smaller group must exercise inactive -> active.
+        $reactivations = MembershipStatusHistory::query()
+            ->where('from_status', MembershipStatus::Inactive)
+            ->where('to_status', MembershipStatus::Active)
+            ->count();
+
+        $this->assertGreaterThanOrEqual(
+            DemoMembershipSeeder::REACTIVATION_TOTAL,
+            $reactivations,
+            'A deterministic group must record inactive -> active transitions.',
+        );
 
         // Archived memberships must carry archived_at, others must not.
         $this->assertSame(
@@ -312,7 +439,7 @@ class DemoDatabaseSeederTest extends TestCase
         $this->assertSame(10, $requests->where('status', ApprovalStatus::Approved)->count());
         $this->assertSame(10, $requests->where('status', ApprovalStatus::Rejected)->count());
 
-        // Every approval touches a siswa membership and carries a unique member number payload.
+        // Every approval targets a membership and carries a unique member number payload.
         $payloadNumbers = [];
         foreach ($requests as $request) {
             $this->assertNotNull($request->payload['member_number'] ?? null, 'Approval payload must carry a member number.');
@@ -320,11 +447,35 @@ class DemoDatabaseSeederTest extends TestCase
         }
         $this->assertSame(count($payloadNumbers), count(array_unique($payloadNumbers)), 'Approval payload member numbers must be unique.');
 
-        // Approved conversions actually convert the membership and set its member number.
+        // Each conversion writes exactly one siswa -> warga history row whose
+        // from/to status matches the membership's actual (unchanged) status.
+        $approvedNumbers = $requests->where('status', ApprovalStatus::Approved)->pluck('payload.member_number')->all();
+        $conversionHistories = MembershipStatusHistory::query()
+            ->where('reason', 'warga_conversion_approved')
+            ->get();
+
+        $this->assertSame(10, $conversionHistories->count(), 'There must be exactly ten conversion history rows.');
+
+        foreach ($conversionHistories as $history) {
+            $this->assertSame(
+                $history->membership->status,
+                $history->from_status,
+                'A conversion history from_status must equal the membership status.',
+            );
+            $this->assertSame(
+                $history->membership->status,
+                $history->to_status,
+                'A conversion history to_status must equal the membership status.',
+            );
+            $this->assertSame(MembershipType::Warga, $history->membership->type);
+        }
+
+        // Approved conversions actually convert the membership and set its number.
         foreach ($requests->where('status', ApprovalStatus::Approved) as $request) {
             $membership = $request->membership;
             $this->assertSame(MembershipType::Warga, $membership->type, 'Approved conversions must become warga.');
             $this->assertSame($request->payload['member_number'], $membership->member_number);
+            $this->assertContains($membership->member_number, $approvedNumbers);
             $this->assertNotNull($request->reviewed_by_id);
             $this->assertNotNull($request->reviewed_at);
             $this->assertNotSame($request->requested_by_id, $request->reviewed_by_id);
@@ -345,6 +496,7 @@ class DemoDatabaseSeederTest extends TestCase
         foreach ($requests->where('status', ApprovalStatus::Pending) as $request) {
             $this->assertNull($request->reviewed_by_id);
             $this->assertNull($request->reviewed_at);
+            $this->assertSame(MembershipType::Siswa, $request->membership->type, 'Pending conversions must remain siswa.');
 
             $this->assertFalse(
                 app(ApprovalRequestPolicy::class)->review($request->requester, $request),
@@ -397,6 +549,7 @@ class DemoDatabaseSeederTest extends TestCase
             'membership.created',
             'membership.status_changed',
             'membership.converted_to_warga',
+            'content.published',
         ] as $action) {
             $this->assertGreaterThan(
                 0,
@@ -404,6 +557,16 @@ class DemoDatabaseSeederTest extends TestCase
                 "Audit action {$action} must be present.",
             );
         }
+
+        // The seeded publication audit is the placeholder written by
+        // DemoWorkflowSeeder until Task 5 owns real publication records.
+        $published = AuditEvent::query()->where('action', 'content.published')->firstOrFail();
+        $this->assertSame(
+            OrganizationUnit::query()->where('type', OrganizationUnitType::Provinsi)->value('id'),
+            $published->subject_id,
+            'The placeholder publication audit must be attached to the province unit.',
+        );
+        $this->assertSame('organization_profile', $published->metadata['content_type'] ?? null);
 
         foreach (AuditEvent::query()->get() as $event) {
             $this->assertNotSame('', (string) $event->subject_type, 'Audit events must reference a subject.');
@@ -416,19 +579,35 @@ class DemoDatabaseSeederTest extends TestCase
         $this->seed(DemoDatabaseSeeder::class);
 
         $counts = [
-            'people' => Membership::query()->count(),
+            'people' => Person::query()->count(),
             'memberships' => Membership::query()->count(),
             'histories' => MembershipStatusHistory::query()->count(),
             'approvals' => ApprovalRequest::query()->count(),
             'audits' => AuditEvent::query()->count(),
         ];
 
+        // Natural-key snapshots, not just counts: every membership must keep a
+        // stable person link and every person a stable name.
+        $personNamesBefore = Person::query()->orderBy('id')->pluck('name')->all();
+        $membershipKeysBefore = Membership::query()->orderBy('id')->pluck('person_id')->all();
+
         $this->seed(DemoDatabaseSeeder::class);
 
+        $this->assertSame($counts['people'], Person::query()->count(), 'Rerun must not duplicate people.');
         $this->assertSame($counts['memberships'], Membership::query()->count(), 'Rerun must not duplicate memberships.');
         $this->assertSame($counts['histories'], MembershipStatusHistory::query()->count(), 'Rerun must not duplicate status histories.');
         $this->assertSame($counts['approvals'], ApprovalRequest::query()->count(), 'Rerun must not duplicate approval requests.');
         $this->assertSame($counts['audits'], AuditEvent::query()->count(), 'Rerun must not duplicate audit events.');
+
+        $this->assertSame($personNamesBefore, Person::query()->orderBy('id')->pluck('name')->all(), 'Person natural keys must be stable.');
+        $this->assertSame($membershipKeysBefore, Membership::query()->orderBy('id')->pluck('person_id')->all(), 'Membership person links must be stable.');
+
+        // Each person is linked to exactly one membership.
+        $this->assertSame(
+            Person::query()->count(),
+            Membership::query()->distinct()->count('person_id'),
+            'There must be exactly one membership per person.',
+        );
 
         $this->assertGreaterThan(0, Membership::query()->count());
     }

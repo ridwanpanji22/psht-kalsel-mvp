@@ -8,6 +8,9 @@ use App\Models\UnitAssignment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\MessageBag;
+use Illuminate\Support\ViewErrorBag;
+use Illuminate\Testing\TestResponse;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
@@ -24,7 +27,7 @@ class DemoAuthenticationTest extends TestCase
             'password' => 'PshtKalsel@1922',
         ]);
 
-        $this->assertContains($response->status(), [403, 404], 'Demo auth must be hidden when disabled.');
+        $this->assertSame(404, $response->status(), 'Demo auth must behave as missing when disabled.');
         $this->assertGuest();
     }
 
@@ -143,8 +146,82 @@ class DemoAuthenticationTest extends TestCase
             'password' => 'PshtKalsel@1922',
         ]);
 
-        $response->assertSessionHasErrors();
+        $snapshot = $this->snapshotFailure($response);
+
+        $this->assertSame(302, $snapshot['status']);
+        $this->assertSame('/admin/login', $snapshot['location']);
+        $this->assertSame(
+            ['Email atau kata sandi demo tidak cocok, atau akun belum aktif.'],
+            $snapshot['messages']['email'] ?? null,
+            'Unknown accounts must return the uniform demo failure message.',
+        );
         $this->assertGuest();
+    }
+
+    public function test_demo_login_wrong_password_and_unknown_account_are_indistinguishable(): void
+    {
+        config()->set('app.demo_auth_enabled', true);
+
+        $operator = $this->createOperator();
+
+        // Capture each response's failure snapshot IMMEDIATELY, before the next
+        // request overwrites the shared mutable session in the test harness.
+        $wrongPassword = $this->snapshotFailure(
+            $this->from('/admin/login')->post('/admin/demo/auth/session', [
+                'email' => $operator->email,
+                'password' => 'not-the-password',
+            ]),
+        );
+
+        $unknownAccount = $this->snapshotFailure(
+            $this->from('/admin/login')->post('/admin/demo/auth/session', [
+                'email' => 'tidak.ada@psht-kalsel.test',
+                'password' => 'PshtKalsel@1922',
+            ]),
+        );
+
+        $this->assertSame(
+            $wrongPassword['status'],
+            $unknownAccount['status'],
+            'Wrong-password and unknown-account statuses must match.',
+        );
+        $this->assertSame(
+            $wrongPassword['location'],
+            $unknownAccount['location'],
+            'Wrong-password and unknown-account redirect targets must match.',
+        );
+        $this->assertSame(
+            $wrongPassword['messages'],
+            $unknownAccount['messages'],
+            'Wrong-password and unknown-account error messages must be identical.',
+        );
+
+        $this->assertNotEmpty($wrongPassword['messages'], 'The parity snapshot must not be vacuous.');
+
+        $this->assertGuest();
+    }
+
+    /**
+     * Capture an immutable failure snapshot immediately after a response is
+     * issued, before any later request can mutate the shared session store.
+     *
+     * @return array{status: int, location: string|null, messages: array<string, list<string>>}
+     */
+    private function snapshotFailure(TestResponse $response): array
+    {
+        $raw = $response->getSession()->get('errors');
+        $errorBag = $raw instanceof ViewErrorBag
+            ? $raw
+            : (new ViewErrorBag)->put('default', new MessageBag($raw['default']['messages'] ?? []));
+
+        $location = $response->headers->get('Location');
+        $locationPath = $location === null ? null : (parse_url($location, PHP_URL_PATH) ?: $location);
+
+        return [
+            'status' => (int) $response->getStatusCode(),
+            'location' => $locationPath,
+            'messages' => $errorBag->getBag('default')->getMessages(),
+        ];
     }
 
     /**

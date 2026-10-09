@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Actions\ApproveWargaConversion;
 use App\Enums\ApprovalStatus;
 use App\Enums\MembershipStatus;
 use App\Enums\MembershipType;
@@ -21,11 +22,15 @@ use Illuminate\Support\Facades\DB;
  * Seeds the deterministic synthetic membership dataset.
  *
  * Produces exactly 1,800 memberships spread across the province, branches,
- * rantings, rayons, UKM, and Komisariat with roughly 60% siswa / 40% warga.
- * Direct Eloquent writes inside a single transaction are used instead of the
- * actor-scoped create actions because 1,800 action calls would be needlessly
- * slow and would couple seed ordering to UI validation. The same observable
- * status-history and audit rows those actions produce are written explicitly.
+ * rantings, rayons, UKM, and Komisariat with a 60% siswa / 40% warga creation
+ * split. Direct Eloquent writes are used instead of the actor-scoped create
+ * actions because 1,800 action calls would be needlessly slow and would couple
+ * seed ordering to UI validation. The same observable status-history and audit
+ * rows those actions produce are written explicitly.
+ *
+ * All base creation, status mutations, conversion approvals, histories, and
+ * audit rows run inside one DB transaction so a partially-seeded workflow can
+ * never commit.
  *
  * No NIK, credential, or real identity is generated: names, birth places, and
  * member numbers are all synthetic and deterministic.
@@ -35,7 +40,7 @@ class DemoMembershipSeeder extends Seeder
     /** Total deterministic memberships. */
     public const TOTAL = 1800;
 
-    /** Memberships whose current status is not active. */
+    /** Memberships whose current status is not active (variant block, top of range). */
     public const STATUS_VARIANT_TOTAL = 200;
 
     /** Warga conversion approval requests. */
@@ -49,6 +54,20 @@ class DemoMembershipSeeder extends Seeder
 
     /** Number of distinct approval statuses cycled across conversion requests. */
     private const CONVERSION_STATUSES = 3;
+
+    /**
+     * Memberships that perform an inactive -> active round trip inside the
+     * variant block, on top of the stopped/inactive/archived variants.
+     */
+    public const REACTIVATION_TOTAL = 30;
+
+    /**
+     * Base creation ratio: `index % 5 < 2` => warga, giving 40% warga and
+     * 60% siswa before conversions move another 10 siswa to warga.
+     */
+    private const WARGA_RATIO_MODULUS = 5;
+
+    private const WARGA_RATIO_REMAINDERS = [0, 1];
 
     /** Deterministic timestamps keep the dataset reproducible. */
     private const REVIEWED_AT = '2026-09-15 10:00:00';
@@ -95,7 +114,7 @@ class DemoMembershipSeeder extends Seeder
         /** @var array<int, int> $membershipIdByIndex membershipId for each membership index. */
         $membershipIdByIndex = [];
 
-        /** @var array<string, User> $operatorsByUnitId resolved unit operators. */
+        /** @var array<int, User> $operatorsByUnitId resolved unit operators. */
         $operatorsByUnitId = [];
 
         $this->forEachContextOperator($context, function (User $operator) use (&$operatorsByUnitId): void {
@@ -106,12 +125,8 @@ class DemoMembershipSeeder extends Seeder
 
         $fallbackOperator = $context->operator('operator-provinsi');
 
-        // Warga conversions are deterministic and index-based; memberships that
-        // will be converted (approved) must be created as warga from the start
-        // so reruns never regress a converted membership back to siswa.
-        $convertedIndices = $this->convertedIndices();
-
-        DB::transaction(function () use ($units, $operatorsByUnitId, $fallbackOperator, $convertedIndices, &$unitByIndex, &$membershipIdByIndex): void {
+        DB::transaction(function () use ($context, $units, $operatorsByUnitId, $fallbackOperator, &$unitByIndex, &$membershipIdByIndex): void {
+            // 1. Base creation (60% siswa / 40% warga by ratio).
             foreach ($this->chunked(range(1, self::TOTAL)) as $chunk) {
                 foreach ($chunk as $index) {
                     $this->createMembership(
@@ -119,20 +134,20 @@ class DemoMembershipSeeder extends Seeder
                         $units[$index % count($units)],
                         $operatorsByUnitId,
                         $fallbackOperator,
-                        in_array($index, $convertedIndices, true),
                         $unitByIndex,
                         $membershipIdByIndex,
                     );
                 }
             }
+
+            // 2. Status variants (inactive/stopped/archived + reactivation),
+            //    on a block disjoint from the conversion targets.
+            $this->applyStatusVariants($operatorsByUnitId, $fallbackOperator, $unitByIndex, $membershipIdByIndex);
+
+            // 3. Warga conversions on genuine siswa memberships disjoint from
+            //    the variant block.
+            $this->seedWargaConversions($context, $unitByIndex, $membershipIdByIndex);
         });
-
-        // Deterministic key groups, only using enum-valid transitions.
-        $this->applyStatusVariants($operatorsByUnitId, $fallbackOperator, $unitByIndex, $membershipIdByIndex);
-
-        // Approval requests are built after statuses settle so converted
-        // memberships do not conflict with the archived/stopped groups.
-        $this->seedWargaConversions($context, $unitByIndex, $membershipIdByIndex);
     }
 
     /**
@@ -163,14 +178,11 @@ class DemoMembershipSeeder extends Seeder
         OrganizationUnit $unit,
         array $operatorsByUnitId,
         User $fallbackOperator,
-        bool $isConvertedWarga,
         array &$unitByIndex,
         array &$membershipIdByIndex,
     ): void {
         $key = $this->memberKey($index);
-        $type = $isConvertedWarga || $index % 5 === 0
-            ? MembershipType::Warga
-            : MembershipType::Siswa;
+        $type = $this->isBaseWarga($index) ? MembershipType::Warga : MembershipType::Siswa;
         $memberNumber = $type === MembershipType::Warga ? $this->wargaNumber($index) : null;
 
         $person = Person::query()->updateOrCreate(
@@ -214,6 +226,14 @@ class DemoMembershipSeeder extends Seeder
 
         $unitByIndex[$index] = $unit->id;
         $membershipIdByIndex[$index] = (int) $membership->id;
+    }
+
+    /**
+     * Whether a member index is warga by the base creation ratio (40% warga).
+     */
+    private function isBaseWarga(int $index): bool
+    {
+        return in_array($index % self::WARGA_RATIO_MODULUS, self::WARGA_RATIO_REMAINDERS, true);
     }
 
     /**
@@ -265,8 +285,22 @@ class DemoMembershipSeeder extends Seeder
     }
 
     /**
+     * The member indices reserved for status variants. These are the top of the
+     * range and are guaranteed disjoint from {@see self::conversionIndices()}.
+     *
+     * @return list<int>
+     */
+    private function statusVariantIndices(): array
+    {
+        return range(self::TOTAL - self::STATUS_VARIANT_TOTAL + 1, self::TOTAL);
+    }
+
+    /**
      * Apply non-active statuses to a deterministic subset, writing the same
      * history and audit rows the ChangeMembershipStatus action would produce.
+     *
+     * Five patterns cycle, including a smaller group that performs an
+     * inactive -> active round trip so reactivation transitions are represented.
      *
      * @param  array<int, User>  $operatorsByUnitId
      * @param  array<int, int>  $unitByIndex
@@ -278,12 +312,11 @@ class DemoMembershipSeeder extends Seeder
         array $unitByIndex,
         array $membershipIdByIndex,
     ): void {
-        for ($variant = 0; $variant < self::STATUS_VARIANT_TOTAL; $variant++) {
-            $index = self::TOTAL - $variant;
+        foreach ($this->statusVariantIndices() as $variant => $index) {
             $membership = Membership::query()->findOrFail($membershipIdByIndex[$index]);
             $operator = $operatorsByUnitId[$unitByIndex[$index]] ?? $fallbackOperator;
 
-            match ($variant % 4) {
+            match ($variant % 5) {
                 // active -> archived (direct, enum-valid).
                 0 => $this->applyTransition($membership, $operator, MembershipStatus::Archived, 'demo_status_archived'),
                 // active -> stopped.
@@ -291,7 +324,9 @@ class DemoMembershipSeeder extends Seeder
                 // active -> inactive.
                 2 => $this->applyTransition($membership, $operator, MembershipStatus::Inactive, 'demo_status_inactive'),
                 // active -> stopped -> archived (two-step valid path).
-                default => $this->applyStoppedThenArchived($membership, $operator),
+                3 => $this->applyStoppedThenArchived($membership, $operator),
+                // active -> inactive -> active (reactivation round trip).
+                default => $this->applyInactiveThenActive($membership, $operator),
             };
         }
     }
@@ -321,6 +356,21 @@ class DemoMembershipSeeder extends Seeder
 
         $membership->update(['status' => MembershipStatus::Archived, 'archived_at' => now()]);
         $this->writeTransition($membership, $operator, MembershipStatus::Stopped, MembershipStatus::Archived, 'demo_status_archived');
+    }
+
+    /**
+     * active -> inactive -> active, yielding a real inactive -> active history
+     * row and a final active membership.
+     */
+    private function applyInactiveThenActive(Membership $membership, User $operator): void
+    {
+        $from = $membership->status;
+
+        $membership->update(['status' => MembershipStatus::Inactive, 'archived_at' => null]);
+        $this->writeTransition($membership, $operator, $from, MembershipStatus::Inactive, 'demo_status_inactive');
+
+        $membership->update(['status' => MembershipStatus::Active, 'archived_at' => null]);
+        $this->writeTransition($membership, $operator, MembershipStatus::Inactive, MembershipStatus::Active, 'demo_status_reactivated');
     }
 
     private function writeTransition(
@@ -356,7 +406,8 @@ class DemoMembershipSeeder extends Seeder
 
     /**
      * Seed exactly 30 warga conversion requests: 10 pending, 10 approved,
-     * 10 rejected, all on siswa memberships with unique payload numbers.
+     * 10 rejected, all against genuine siswa memberships that are disjoint from
+     * the status-variant block.
      *
      * @param  array<int, int>  $unitByIndex
      * @param  array<int, int>  $membershipIdByIndex
@@ -372,9 +423,6 @@ class DemoMembershipSeeder extends Seeder
             ApprovalStatus::Rejected,
         ];
 
-        // Deterministic, state-independent targets: a fixed block of member
-        // indices below the status-variant range, so a rerun converts the same
-        // memberships instead of drifting to whichever ones are still siswa.
         foreach ($this->conversionIndices() as $offset => $memberIndex) {
             $membership = Membership::query()->findOrFail($membershipIdByIndex[$memberIndex]);
             $status = $statuses[$offset % self::CONVERSION_STATUSES];
@@ -401,47 +449,31 @@ class DemoMembershipSeeder extends Seeder
     /**
      * The deterministic member indices that receive a warga conversion request.
      *
-     * Indices are chosen below the reserved variant range and are all true
-     * siswa at creation (not part of the base warga ratio), so a conversion
-     * always starts from a real siswa membership.
+     * They are genuine base-ratio siswa, sit strictly below the status-variant
+     * block, and are therefore disjoint from {@see self::statusVariantIndices()}.
      *
      * @return list<int>
      */
     private function conversionIndices(): array
     {
-        $start = self::TOTAL - self::STATUS_VARIANT_TOTAL - self::CONVERSION_TOTAL;
+        $variantStart = self::TOTAL - self::STATUS_VARIANT_TOTAL + 1;
         $indices = [];
 
-        for ($index = $start + 1; count($indices) < self::CONVERSION_TOTAL && $index <= self::TOTAL; $index++) {
-            // Skip base-ratio warga memberships so conversions are siswa -> warga.
-            if ($index % 5 === 0) {
+        for ($index = $variantStart - 1; count($indices) < self::CONVERSION_TOTAL && $index >= 1; $index--) {
+            // Only genuine siswa at creation, so the conversion is siswa -> warga.
+            if ($this->isBaseWarga($index)) {
                 continue;
             }
 
             $indices[] = $index;
         }
 
-        return $indices;
-    }
-
-    /**
-     * The member indices whose conversion is approved, i.e. created as warga
-     * from the start. Matches the offset pattern used by
-     * {@see self::seedWargaConversions()} where every third offset is approved.
-     *
-     * @return list<int>
-     */
-    private function convertedIndices(): array
-    {
-        $converted = [];
-
-        foreach ($this->conversionIndices() as $offset => $memberIndex) {
-            if ($offset % self::CONVERSION_STATUSES === 1) {
-                $converted[] = $memberIndex;
-            }
+        if (count($indices) !== self::CONVERSION_TOTAL) {
+            throw new \LogicException('Unable to select 30 conversion memberships disjoint from the variant block.');
         }
 
-        return $converted;
+        // Return in ascending order for deterministic, stable iteration.
+        return array_reverse($indices);
     }
 
     /**
@@ -476,6 +508,12 @@ class DemoMembershipSeeder extends Seeder
         return $attributes;
     }
 
+    /**
+     * Convert a genuine siswa membership to warga, mirroring
+     * {@see ApproveWargaConversion}: status is unchanged
+     * (active -> active), so the conversion history's from/to status matches the
+     * membership's actual status at approval time.
+     */
     private function applyApprovedConversion(
         Membership $membership,
         ApprovalRequest $request,
@@ -483,6 +521,8 @@ class DemoMembershipSeeder extends Seeder
         string $memberNumber,
         int $index,
     ): void {
+        $previousStatus = $membership->status;
+
         $membership->update([
             'type' => MembershipType::Warga,
             'member_number' => $memberNumber,
@@ -490,8 +530,8 @@ class DemoMembershipSeeder extends Seeder
 
         $membership->statusHistories()->updateOrCreate(
             [
-                'from_status' => MembershipStatus::Active,
-                'to_status' => MembershipStatus::Active,
+                'from_status' => $previousStatus,
+                'to_status' => $previousStatus,
                 'reason' => 'warga_conversion_approved',
             ],
             ['actor_id' => $reviewer->id],
@@ -535,9 +575,9 @@ class DemoMembershipSeeder extends Seeder
      * scope. Prefer the unit's own operator, then the branch operator, then the
      * province operator.
      *
-     * Reviewer visibility follows {@see OrganizationScope}: an actor
-     * sees their assigned unit and its descendants, so any operator assigned at
-     * the unit or an ancestor of it can review.
+     * Reviewer visibility follows {@see OrganizationScope}: an
+     * actor sees their assigned unit and its descendants, so any operator
+     * assigned at the unit or an ancestor of it can review.
      */
     private function reviewerFor(DemoSeedContext $context, OrganizationUnit $unit, User $requester): User
     {
@@ -566,12 +606,12 @@ class DemoMembershipSeeder extends Seeder
     }
 
     /**
-     * Resolve the unit's own operator by matching the context operator keys,
-     * which follow the `operator-{unit key}` convention from DemoOperatorSeeder.
+     * Resolve the unit's own operator by walking the context operators, which
+     * follow the `operator-{unit key}` convention from DemoOperatorSeeder.
      */
     private function operatorForUnitKey(DemoSeedContext $context, OrganizationUnit $unit): ?User
     {
-        foreach ($context->operators() as $key => $operator) {
+        foreach ($context->operators() as $operator) {
             if ($this->operatorOwnsUnit($operator, $unit)) {
                 return $operator;
             }

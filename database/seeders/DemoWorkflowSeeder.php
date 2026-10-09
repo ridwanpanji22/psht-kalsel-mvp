@@ -7,6 +7,7 @@ use App\Models\Membership;
 use App\Models\User;
 use Database\Seeders\Support\DemoSeedContext;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Seeds the workflow audit trail produced alongside the membership and
@@ -31,8 +32,11 @@ class DemoWorkflowSeeder extends Seeder
 
     public function run(DemoSeedContext $context): void
     {
-        $this->seedOperatorAudits($context);
-        $this->seedPublicationAudits($context);
+        // One transaction: a partially-written audit trail must never commit.
+        DB::transaction(function () use ($context): void {
+            $this->seedOperatorAudits($context);
+            $this->seedPublicationAudits($context);
+        });
     }
 
     /**

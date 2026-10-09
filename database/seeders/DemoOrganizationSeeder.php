@@ -6,6 +6,7 @@ use App\Models\OrganizationUnit;
 use App\OrganizationUnitType;
 use Database\Seeders\Support\DemoSeedContext;
 use Illuminate\Database\Seeder;
+use RuntimeException;
 
 /**
  * Seeds the deterministic demo organization tree for PSHT Kalimantan Selatan.
@@ -67,8 +68,26 @@ class DemoOrganizationSeeder extends Seeder
 
     private function seedProvince(DemoSeedContext $context): void
     {
+        $demoProvinceName = 'Pengurus Provinsi Kalimantan Selatan';
+
+        // Refuse to run against a database that already holds a *different*
+        // province root. The domain allows exactly one formal province, and the
+        // "no global delete / no reparent" rule forbids cleaning up a foreign
+        // root, so the safest action is to stop before writing anything.
+        $foreignProvinceExists = OrganizationUnit::query()
+            ->where('type', OrganizationUnitType::Provinsi)
+            ->where('name', '!=', $demoProvinceName)
+            ->exists();
+
+        if ($foreignProvinceExists) {
+            throw new RuntimeException(
+                'Seeder demo dihentikan: database sudah memiliki unit provinsi lain. '.
+                'Jalankan pada database demo yang bersih atau reset terlebih dahulu.',
+            );
+        }
+
         $province = $this->upsertUnit(
-            name: 'Pengurus Provinsi Kalimantan Selatan',
+            name: $demoProvinceName,
             type: OrganizationUnitType::Provinsi,
             parentId: null,
         );
