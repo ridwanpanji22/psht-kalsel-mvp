@@ -3,21 +3,28 @@
 namespace Tests\Feature;
 
 use App\Enums\ApprovalStatus;
+use App\Enums\GalleryCategory;
 use App\Enums\MembershipStatus;
 use App\Enums\MembershipType;
+use App\Enums\PublicationStatus;
 use App\Models\ApprovalRequest;
 use App\Models\AuditEvent;
+use App\Models\Event;
+use App\Models\Gallery;
 use App\Models\Membership;
 use App\Models\MembershipStatusHistory;
 use App\Models\OrganizationPosition;
 use App\Models\OrganizationUnit;
+use App\Models\Page;
 use App\Models\Person;
+use App\Models\TrainingLocation;
 use App\Models\UnitAssignment;
 use App\Models\User;
 use App\OrganizationUnitType;
 use App\Policies\ApprovalRequestPolicy;
 use App\Policies\MembershipPolicy;
 use App\Policies\MembershipStatusHistoryPolicy;
+use App\Support\SafeStoragePath;
 use Database\Seeders\DemoDatabaseSeeder;
 use Database\Seeders\DemoMembershipSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -632,6 +639,232 @@ class DemoDatabaseSeederTest extends TestCase
                 "Membership in {$unitType->value} must be visible to its unit operator.",
             );
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Task 5 — pages, activities, training locations, galleries
+    // -----------------------------------------------------------------
+
+    public function test_demo_seed_creates_publication_count_targets(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $this->assertSame(8, Page::query()->count(), 'There must be exactly eight pages.');
+        $this->assertSame(39, Event::query()->count(), 'There must be exactly 39 activities.');
+
+        $this->assertSame(
+            65,
+            TrainingLocation::query()->count(),
+            'There must be exactly 65 training locations.',
+        );
+
+        $this->assertSame(26, Gallery::query()->count(), 'There must be exactly 26 galleries.');
+
+        // Every activity/location/gallery has at least one future and one past
+        // activity row across the dataset.
+        $this->assertGreaterThanOrEqual(
+            1,
+            Event::query()->where('starts_at', '>=', now())->count(),
+            'At least one activity must be upcoming.',
+        );
+        $this->assertGreaterThanOrEqual(
+            1,
+            Event::query()->where('starts_at', '<', now())->count(),
+            'At least one activity must be in the past.',
+        );
+
+        // All five training-location owner types are represented.
+        $candidateTypes = [
+            OrganizationUnitType::Cabang,
+            OrganizationUnitType::Ranting,
+            OrganizationUnitType::Rayon,
+            OrganizationUnitType::Ukm,
+            OrganizationUnitType::Komisariat,
+        ];
+
+        foreach ($candidateTypes as $type) {
+            $unitIds = OrganizationUnit::query()->where('type', $type)->pluck('id');
+            $count = TrainingLocation::query()->whereIn('organization_unit_id', $unitIds)->count();
+
+            $this->assertGreaterThan(
+                0,
+                $count,
+                "Training locations must cover owner type {$type->value}.",
+            );
+        }
+
+        // Gallery categories latihan / kegiatan / pembinaan are all present.
+        foreach ([GalleryCategory::Latihan, GalleryCategory::Kegiatan, GalleryCategory::Pembinaan] as $category) {
+            $this->assertGreaterThan(
+                0,
+                Gallery::query()->where('category', $category)->count(),
+                "Gallery category {$category->value} must be represented.",
+            );
+        }
+    }
+
+    public function test_demo_seed_publication_states_and_published_fields_are_consistent(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        foreach ([
+            Page::class,
+            Event::class,
+            TrainingLocation::class,
+            Gallery::class,
+        ] as $modelClass) {
+            foreach (PublicationStatus::cases() as $status) {
+                $this->assertGreaterThan(
+                    0,
+                    $modelClass::query()->where('status', $status)->count(),
+                    "{$modelClass} must contain at least one {$status->value} row.",
+                );
+            }
+
+            // Only published rows carry published_at / published_by_id.
+            $this->assertSame(
+                $modelClass::query()->where('status', PublicationStatus::Published)->count(),
+                $modelClass::query()->whereNotNull('published_at')->whereNotNull('published_by_id')->count(),
+                "{$modelClass} must set published_at and published_by_id exactly for published rows.",
+            );
+
+            $this->assertSame(
+                0,
+                $modelClass::query()
+                    ->where('status', '!=', PublicationStatus::Published)
+                    ->where(function ($query): void {
+                        $query->whereNotNull('published_at')->orWhereNotNull('published_by_id');
+                    })
+                    ->count(),
+                "{$modelClass} must not expose publication fields on non-published rows.",
+            );
+        }
+    }
+
+    public function test_demo_seed_pages_and_activity_ownership_and_covers_are_safe(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // Pages: organization profile + province history are unit-less; branch
+        // histories point at their branch.
+        $this->assertSame(
+            2,
+            Page::query()->whereNull('organization_unit_id')->count(),
+            'The general profile and province history must not be unit-scoped.',
+        );
+
+        $this->assertSame(
+            6,
+            Page::query()->whereNotNull('organization_unit_id')->count(),
+            'Six branch histories must each point at a branch.',
+        );
+
+        $branchIds = OrganizationUnit::query()->where('type', OrganizationUnitType::Cabang)->pluck('id');
+        $this->assertSame(
+            0,
+            Page::query()
+                ->whereNotNull('organization_unit_id')
+                ->whereNotIn('organization_unit_id', $branchIds)
+                ->count(),
+            'Branch histories must point at branch units.',
+        );
+
+        // Every activity owner is a branch or a ranting.
+        $allowedOwnerIds = OrganizationUnit::query()
+            ->whereIn('type', [OrganizationUnitType::Cabang, OrganizationUnitType::Ranting])
+            ->pluck('id');
+
+        $this->assertSame(
+            0,
+            Event::query()->whereNotIn('organization_unit_id', $allowedOwnerIds)->count(),
+            'Activities must belong to a branch or a ranting.',
+        );
+
+        // Every gallery/location owner is a seeded unit (FK already guarantees
+        // existence); assert locations never live at the province root.
+        $provinceId = OrganizationUnit::query()->where('type', OrganizationUnitType::Provinsi)->value('id');
+        $this->assertSame(
+            0,
+            TrainingLocation::query()->where('organization_unit_id', $provinceId)->count(),
+            'Training locations must not belong to the province root.',
+        );
+
+        // Filled cover paths must be traversal-safe and paired with alt text.
+        foreach (Event::query()->whereNotNull('cover_path')->get() as $event) {
+            $this->assertTrue(
+                SafeStoragePath::isSafe((string) $event->cover_path, [SafeStoragePath::EVENT_COVER_PREFIX]),
+                "Event {$event->slug} cover path must be a safe private/event-covers path.",
+            );
+            $this->assertNotNull($event->cover_alt_text, 'Every filled event cover needs alt text.');
+        }
+
+        // Published events with a cover always carry alt text.
+        foreach (Event::query()->whereNotNull('cover_path')->get() as $event) {
+            if ($event->status === PublicationStatus::Published) {
+                $this->assertNotEmpty($event->cover_alt_text, 'Published event covers need alt text.');
+            }
+        }
+
+        // Training locations only carry coordinates inside Kalimantan Selatan bounds.
+        foreach (TrainingLocation::query()->get() as $location) {
+            $latitude = (float) $location->latitude;
+            $longitude = (float) $location->longitude;
+
+            $this->assertGreaterThanOrEqual(-4.5, $latitude, "Location {$location->slug} latitude out of range.");
+            $this->assertLessThanOrEqual(-1.5, $latitude, "Location {$location->slug} latitude out of range.");
+            $this->assertGreaterThanOrEqual(113.5, $longitude, "Location {$location->slug} longitude out of range.");
+            $this->assertLessThanOrEqual(117.5, $longitude, "Location {$location->slug} longitude out of range.");
+        }
+
+        // Verified timestamps only for a deterministic published subset; at
+        // least one published-but-unverified location still exists.
+        $this->assertGreaterThan(
+            0,
+            TrainingLocation::query()->whereNotNull('verified_at')->count(),
+            'Some published locations must be verified for the public map.',
+        );
+        $this->assertSame(
+            0,
+            TrainingLocation::query()->whereNotNull('verified_at')->where('status', '!=', PublicationStatus::Published)->count(),
+            'Only published locations may be verified.',
+        );
+        $this->assertGreaterThan(
+            0,
+            TrainingLocation::query()
+                ->where('status', PublicationStatus::Published)
+                ->whereNull('verified_at')
+                ->count(),
+            'At least one published location must remain unverified to exercise the verified-only contract.',
+        );
+    }
+
+    public function test_demo_seed_publication_data_is_rerunnable(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $counts = [
+            'pages' => Page::query()->count(),
+            'events' => Event::query()->count(),
+            'locations' => TrainingLocation::query()->count(),
+            'galleries' => Gallery::query()->count(),
+        ];
+
+        $pageSlugs = Page::query()->orderBy('id')->pluck('slug')->all();
+        $eventSlugs = Event::query()->orderBy('id')->pluck('slug')->all();
+        $locationSlugs = TrainingLocation::query()->orderBy('id')->pluck('slug')->all();
+        $gallerySlugs = Gallery::query()->orderBy('id')->pluck('slug')->all();
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $this->assertSame($counts['pages'], Page::query()->count(), 'Rerun must not duplicate pages.');
+        $this->assertSame($counts['events'], Event::query()->count(), 'Rerun must not duplicate activities.');
+        $this->assertSame($counts['locations'], TrainingLocation::query()->count(), 'Rerun must not duplicate locations.');
+        $this->assertSame($counts['galleries'], Gallery::query()->count(), 'Rerun must not duplicate galleries.');
+
+        $this->assertSame($pageSlugs, Page::query()->orderBy('id')->pluck('slug')->all(), 'Page slugs must be stable.');
+        $this->assertSame($eventSlugs, Event::query()->orderBy('id')->pluck('slug')->all(), 'Event slugs must be stable.');
+        $this->assertSame($locationSlugs, TrainingLocation::query()->orderBy('id')->pluck('slug')->all(), 'Location slugs must be stable.');
+        $this->assertSame($gallerySlugs, Gallery::query()->orderBy('id')->pluck('slug')->all(), 'Gallery slugs must be stable.');
     }
 
     /**

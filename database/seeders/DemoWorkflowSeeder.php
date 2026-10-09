@@ -2,8 +2,11 @@
 
 namespace Database\Seeders;
 
+use App\Enums\PublicationStatus;
 use App\Models\AuditEvent;
+use App\Models\Event;
 use App\Models\Membership;
+use App\Models\Page;
 use App\Models\User;
 use Database\Seeders\Support\DemoSeedContext;
 use Illuminate\Database\Seeder;
@@ -36,6 +39,7 @@ class DemoWorkflowSeeder extends Seeder
         DB::transaction(function () use ($context): void {
             $this->seedOperatorAudits($context);
             $this->seedPublicationAudits($context);
+            $this->seedPublishedContentAudits();
         });
     }
 
@@ -99,6 +103,52 @@ class DemoWorkflowSeeder extends Seeder
                 'metadata' => $metadata,
             ],
         );
+    }
+
+    /**
+     * Attach a `content.published` audit row to every published Page and Event
+     * created by {@see DemoPublicationSeeder}, matching what PublishContent
+     * persists. Factored separately from the province-level placeholder so the
+     * Task 4 invariant (subject = province, content_type = organization_profile)
+     * and real publication audits coexist.
+     */
+    private function seedPublishedContentAudits(): void
+    {
+        foreach (Page::query()->where('status', PublicationStatus::Published)->get() as $page) {
+            AuditEvent::query()->updateOrCreate(
+                [
+                    'subject_type' => $page->getMorphClass(),
+                    'subject_id' => $page->id,
+                    'action' => 'content.published',
+                ],
+                [
+                    'actor_id' => $page->published_by_id ?? $page->submitted_by_id,
+                    'metadata' => [
+                        'content_type' => 'page',
+                        'slug' => $page->slug,
+                        'published_at' => $page->published_at?->toDateTimeString(),
+                    ],
+                ],
+            );
+        }
+
+        foreach (Event::query()->where('status', PublicationStatus::Published)->get() as $event) {
+            AuditEvent::query()->updateOrCreate(
+                [
+                    'subject_type' => $event->getMorphClass(),
+                    'subject_id' => $event->id,
+                    'action' => 'content.published',
+                ],
+                [
+                    'actor_id' => $event->published_by_id ?? $event->submitted_by_id,
+                    'metadata' => [
+                        'content_type' => 'event',
+                        'slug' => $event->slug,
+                        'published_at' => $event->published_at?->toDateTimeString(),
+                    ],
+                ],
+            );
+        }
     }
 
     /**
