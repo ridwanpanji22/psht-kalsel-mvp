@@ -2,11 +2,21 @@
 
 namespace Tests\Feature;
 
+use App\Enums\ApprovalStatus;
+use App\Enums\MembershipStatus;
+use App\Enums\MembershipType;
+use App\Models\ApprovalRequest;
+use App\Models\AuditEvent;
+use App\Models\Membership;
+use App\Models\MembershipStatusHistory;
 use App\Models\OrganizationPosition;
 use App\Models\OrganizationUnit;
 use App\Models\UnitAssignment;
 use App\Models\User;
 use App\OrganizationUnitType;
+use App\Policies\ApprovalRequestPolicy;
+use App\Policies\MembershipPolicy;
+use App\Policies\MembershipStatusHistoryPolicy;
 use Database\Seeders\DemoDatabaseSeeder;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -202,6 +212,259 @@ class DemoDatabaseSeederTest extends TestCase
         $this->expectException(\RuntimeException::class);
 
         (new DemoDatabaseSeeder)->run();
+    }
+
+    public function test_demo_seed_creates_membership_distribution_invariants(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $this->assertSame(1800, Membership::query()->count(), 'The demo dataset must contain exactly 1,800 memberships.');
+
+        foreach (MembershipType::cases() as $type) {
+            $this->assertGreaterThan(0, Membership::query()->where('type', $type)->count(), "Membership type {$type->value} must be represented.");
+        }
+
+        foreach (OrganizationUnitType::cases() as $unitType) {
+            $unitIds = OrganizationUnit::query()->where('type', $unitType)->pluck('id');
+
+            $this->assertGreaterThan(
+                0,
+                Membership::query()->whereIn('organization_unit_id', $unitIds)->count(),
+                "Memberships must cover unit type {$unitType->value}.",
+            );
+        }
+
+        foreach (MembershipStatus::cases() as $status) {
+            $this->assertGreaterThan(0, Membership::query()->where('status', $status)->count(), "Membership status {$status->value} must be represented.");
+        }
+
+        // Member numbers: unique and non-null for warga, always null for siswa.
+        $warga = Membership::query()->where('type', MembershipType::Warga)->get();
+        $this->assertGreaterThan(0, $warga->count(), 'There must be warga memberships.');
+        $this->assertNotNull($warga->whereNull('member_number')->first() === null, 'Every warga must have a member number.');
+
+        $wargaNumbers = $warga->pluck('member_number')->all();
+        $this->assertSame(count($wargaNumbers), count(array_unique($wargaNumbers)), 'Warga member numbers must be unique.');
+
+        $this->assertSame(
+            0,
+            Membership::query()->where('type', MembershipType::Siswa)->whereNotNull('member_number')->count(),
+            'Siswa memberships must not carry a member number.',
+        );
+    }
+
+    public function test_demo_seed_creates_status_histories_and_valid_transitions(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $this->assertGreaterThanOrEqual(20, MembershipStatusHistory::query()->count(), 'At least 20 status histories are required.');
+
+        foreach (MembershipStatusHistory::query()->get() as $history) {
+            $this->assertNotNull($history->actor_id, 'Every status history must carry an actor.');
+            $this->assertTrue(
+                $history->to_status instanceof MembershipStatus,
+                'Status histories must cast to MembershipStatus.',
+            );
+
+            // The warga conversion record is a *type* change, not a status
+            // transition: ApproveWargaConversion writes from_status == to_status
+            // on purpose. Every other row must be an enum-valid transition.
+            if ($history->reason === 'warga_conversion_approved') {
+                $this->assertSame($history->from_status, $history->to_status);
+
+                continue;
+            }
+
+            if ($history->from_status !== null) {
+                $this->assertTrue(
+                    $history->from_status->canTransitionTo($history->to_status),
+                    "Transition {$history->from_status->value} -> {$history->to_status->value} must be enum-valid.",
+                );
+            }
+        }
+
+        // Archived memberships must carry archived_at, others must not.
+        $this->assertSame(
+            Membership::query()->where('status', MembershipStatus::Archived)->count(),
+            Membership::query()->whereNotNull('archived_at')->count(),
+            'archived_at must be set exactly for archived memberships.',
+        );
+
+        // History rows must be reviewable by the unit's own operator.
+        $history = MembershipStatusHistory::query()->firstOrFail();
+        $operator = $this->operatorAssignedTo($history->membership->organization_unit_id);
+
+        $this->assertNotNull($operator, 'Each membership unit must have an operator.');
+        $this->assertTrue(
+            app(MembershipStatusHistoryPolicy::class)->view($operator, $history),
+            'The unit operator must be able to review the membership history it created.',
+        );
+    }
+
+    public function test_demo_seed_creates_warga_conversion_requests_with_all_statuses(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $requests = ApprovalRequest::query()->where('type', 'warga_conversion')->get();
+
+        $this->assertSame(30, $requests->count(), 'There must be exactly 30 warga conversion requests.');
+        $this->assertSame(10, $requests->where('status', ApprovalStatus::Pending)->count());
+        $this->assertSame(10, $requests->where('status', ApprovalStatus::Approved)->count());
+        $this->assertSame(10, $requests->where('status', ApprovalStatus::Rejected)->count());
+
+        // Every approval touches a siswa membership and carries a unique member number payload.
+        $payloadNumbers = [];
+        foreach ($requests as $request) {
+            $this->assertNotNull($request->payload['member_number'] ?? null, 'Approval payload must carry a member number.');
+            $payloadNumbers[] = $request->payload['member_number'];
+        }
+        $this->assertSame(count($payloadNumbers), count(array_unique($payloadNumbers)), 'Approval payload member numbers must be unique.');
+
+        // Approved conversions actually convert the membership and set its member number.
+        foreach ($requests->where('status', ApprovalStatus::Approved) as $request) {
+            $membership = $request->membership;
+            $this->assertSame(MembershipType::Warga, $membership->type, 'Approved conversions must become warga.');
+            $this->assertSame($request->payload['member_number'], $membership->member_number);
+            $this->assertNotNull($request->reviewed_by_id);
+            $this->assertNotNull($request->reviewed_at);
+            $this->assertNotSame($request->requested_by_id, $request->reviewed_by_id);
+        }
+
+        // Rejected requests are reviewed but leave the membership untouched.
+        foreach ($requests->where('status', ApprovalStatus::Rejected) as $request) {
+            $this->assertNotNull($request->reviewed_by_id);
+            $this->assertNotNull($request->reviewed_at);
+            $this->assertNotNull($request->review_note);
+            $this->assertNotSame($request->requested_by_id, $request->reviewed_by_id);
+            $this->assertSame(MembershipType::Siswa, $request->membership->type, 'Rejected conversions must stay siswa.');
+            $this->assertNull($request->membership->member_number, 'Rejected conversions must not gain a member number.');
+        }
+
+        // Pending requests are untouched and reviewable by an in-scope operator
+        // other than the requester; the requester must never review their own.
+        foreach ($requests->where('status', ApprovalStatus::Pending) as $request) {
+            $this->assertNull($request->reviewed_by_id);
+            $this->assertNull($request->reviewed_at);
+
+            $this->assertFalse(
+                app(ApprovalRequestPolicy::class)->review($request->requester, $request),
+                'A requester must never be able to review their own request.',
+            );
+
+            $reviewer = User::query()
+                ->where('id', '!=', $request->requested_by_id)
+                ->whereHas('unitAssignments', function ($query) use ($request): void {
+                    $query->whereIn(
+                        'organization_unit_id',
+                        $this->ancestorUnitIds($request->membership->organization_unit_id),
+                    )->where('is_active', true);
+                })
+                ->first();
+
+            $this->assertNotNull($reviewer, 'A pending request must have an in-scope reviewer candidate.');
+
+            $this->assertTrue(
+                app(ApprovalRequestPolicy::class)->review($reviewer, $request),
+                'An in-scope operator distinct from the requester must be able to review a pending request.',
+            );
+        }
+    }
+
+    /**
+     * Unit ids on the path from the membership unit up to the root, i.e. the
+     * operators whose scope covers the membership.
+     *
+     * @return list<int>
+     */
+    private function ancestorUnitIds(int $unitId): array
+    {
+        $ids = [];
+        $current = OrganizationUnit::query()->find($unitId);
+
+        while ($current !== null) {
+            $ids[] = $current->id;
+            $current = $current->parent;
+        }
+
+        return $ids;
+    }
+
+    public function test_demo_seed_creates_audit_events_for_seed_operations(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        foreach ([
+            'membership.created',
+            'membership.status_changed',
+            'membership.converted_to_warga',
+        ] as $action) {
+            $this->assertGreaterThan(
+                0,
+                AuditEvent::query()->where('action', $action)->count(),
+                "Audit action {$action} must be present.",
+            );
+        }
+
+        foreach (AuditEvent::query()->get() as $event) {
+            $this->assertNotSame('', (string) $event->subject_type, 'Audit events must reference a subject.');
+            $this->assertNotNull($event->subject_id);
+        }
+    }
+
+    public function test_demo_seed_membership_data_is_rerunnable(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $counts = [
+            'people' => Membership::query()->count(),
+            'memberships' => Membership::query()->count(),
+            'histories' => MembershipStatusHistory::query()->count(),
+            'approvals' => ApprovalRequest::query()->count(),
+            'audits' => AuditEvent::query()->count(),
+        ];
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $this->assertSame($counts['memberships'], Membership::query()->count(), 'Rerun must not duplicate memberships.');
+        $this->assertSame($counts['histories'], MembershipStatusHistory::query()->count(), 'Rerun must not duplicate status histories.');
+        $this->assertSame($counts['approvals'], ApprovalRequest::query()->count(), 'Rerun must not duplicate approval requests.');
+        $this->assertSame($counts['audits'], AuditEvent::query()->count(), 'Rerun must not duplicate audit events.');
+
+        $this->assertGreaterThan(0, Membership::query()->count());
+    }
+
+    public function test_demo_seed_memberships_are_visible_to_their_unit_operator(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // A representative sample across every unit type must be reviewable in scope.
+        foreach (OrganizationUnitType::cases() as $unitType) {
+            $membership = Membership::query()
+                ->whereIn('organization_unit_id', OrganizationUnit::query()->where('type', $unitType)->pluck('id'))
+                ->first();
+
+            $this->assertNotNull($membership, "No membership found for unit type {$unitType->value}.");
+
+            $operator = $this->operatorAssignedTo($membership->organization_unit_id);
+            $this->assertNotNull($operator, "No operator for unit type {$unitType->value}.");
+
+            $this->assertTrue(
+                app(MembershipPolicy::class)->view($operator, $membership),
+                "Membership in {$unitType->value} must be visible to its unit operator.",
+            );
+        }
+    }
+
+    /**
+     * Resolve the seeded operator assigned directly to a unit.
+     */
+    private function operatorAssignedTo(int $unitId): ?User
+    {
+        return User::query()
+            ->whereHas('unitAssignments', function ($query) use ($unitId): void {
+                $query->where('organization_unit_id', $unitId)->where('is_active', true);
+            })
+            ->first();
     }
 
     /**
