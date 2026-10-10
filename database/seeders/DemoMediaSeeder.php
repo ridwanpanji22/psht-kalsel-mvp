@@ -37,16 +37,19 @@ use Throwable;
  * Three correctness properties are enforced here:
  *
  * 1. **Scoping.** Only galleries/events recorded in the shared context are
- *    touched, and only files inside the deterministic `demo/` namespaces are
- *    written or removed. Unrelated local rows and files are never modified.
- * 2. **Reconciliation.** Because these rows/files are owned by the seeder, a
- *    rerun removes stale demo artifacts: media rows and files whose gallery or
- *    event is no longer in the current seeded key set, and previously-public
- *    lead files of a gallery that is no longer published.
- * 3. **Failure safety.** Every `put`/`copy`/`delete` return value is checked and
- *    files created or promoted during the run are tracked so a mid-run failure
- *    compensates by deleting exactly what this run created; a private source is
- *    only released after its public copy is confirmed present.
+ *    written, and only at the exact deterministic paths this seeder produces.
+ *    Unrelated local rows and files are never modified.
+ * 2. **Ownership.** Reconciliation deletes only rows/files whose path matches
+ *    the exact deterministic demo shape this seeder writes (a gallery-media
+ *    `demo/{key}/media-{1..4}.{ext}` path for a known demo gallery key, or a
+ *    `demo/kegiatan-{n}.{ext}` cover). The `demo/` namespace prefix alone is
+ *    never treated as ownership proof, so foreign rows/files that merely live
+ *    under `demo/` are left untouched.
+ * 3. **Failure safety.** Every `put`/`copy`/`delete` return value is checked,
+ *    the pre-run state of every overwritten or deleted path is snapshotted, and
+ *    a mid-run failure restores those bytes (and removes paths that did not
+ *    previously exist); a private source is released only after its public copy
+ *    is confirmed present.
  */
 class DemoMediaSeeder extends Seeder
 {
@@ -79,24 +82,34 @@ class DemoMediaSeeder extends Seeder
     private const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
     /**
-     * Files written or promoted on the `local` disk during this run, so a
-     * failure can remove exactly what this run created.
-     *
-     * @var list<string>
+     * Exact deterministic shape of a gallery media path this seeder owns:
+     * `private/gallery-media/demo/{key}/media-{slot}.{ext}` or the public
+     * mirror `public/gallery-media/demo/{key}/media-{slot}.{ext}`, where the
+     * slot is 1–4 and the extension is a still-image type. Ownership is proved
+     * by the path shape and a matching demo gallery key — never by the `demo/`
+     * prefix alone.
      */
-    private array $createdLocalFiles = [];
+    private const GALLERY_MEDIA_PATTERN = '#^(?:private/gallery-media/demo|public/gallery-media/demo)/(\d+)/media-([1-4])\.(png|webp|jpg)$#';
 
     /**
-     * Files written or promoted on the `public` disk during this run.
-     *
-     * @var list<string>
+     * Exact deterministic shape of an event cover this seeder owns:
+     * `private/event-covers/demo/kegiatan-{n}.{jpg|webp}`.
      */
-    private array $createdPublicFiles = [];
+    private const EVENT_COVER_PATTERN = '#^private/event-covers/demo/kegiatan-\d+\.(png|webp|jpg)$#';
+
+    /**
+     * Original bytes of every file this run overwrites or deletes, keyed by
+     * disk then path, so a mid-run failure can restore the pre-run state
+     * exactly. A `null` entry records that the path did not exist before the
+     * run (and so must be removed on rollback).
+     *
+     * @var array<string, array<string, string|null>>
+     */
+    private array $journal = [];
 
     public function run(DemoSeedContext $context): void
     {
-        $this->createdLocalFiles = [];
-        $this->createdPublicFiles = [];
+        $this->journal = [];
 
         try {
             DB::transaction(function () use ($context): void {
@@ -104,10 +117,12 @@ class DemoMediaSeeder extends Seeder
                 $this->seedEventCovers($context);
             });
         } catch (Throwable $exception) {
-            $this->compensate();
+            $this->rollbackStorage();
 
             throw $exception;
         }
+
+        $this->journal = [];
     }
 
     /**
@@ -148,7 +163,7 @@ class DemoMediaSeeder extends Seeder
                     throw new RuntimeException("Jalur media demo tidak aman: {$privatePath}");
                 }
 
-                $this->writeFile($localDisk, $privatePath, $this->assetContents($asset), $this->createdLocalFiles);
+                $this->writeFile($localDisk, $privatePath, $this->assetContents($asset));
 
                 // Freeze the fixture's real content type and byte size so the
                 // demo rows carry the same valid metadata the upload contract
@@ -195,29 +210,43 @@ class DemoMediaSeeder extends Seeder
      * Remove demo media rows/files that this seeder previously created but that
      * are no longer part of the current seeded key set.
      *
-     * Scoped to demo namespaces and demo-owned rows only: a media row is stale
-     * when its gallery is no longer among the seeded galleries, or when it is a
-     * previously-public row whose gallery is no longer published. Unrelated
-     * rows/files are never touched.
+     * Ownership is proved by the **exact deterministic path shape** this seeder
+     * writes (`demo/{key}/media-{1..4}.{ext}`) together with a known demo
+     * gallery key — the `demo/` namespace prefix alone is never treated as
+     * proof. A row is reconciled only when its path matches that shape and its
+     * gallery is no longer among the seeded galleries, or when it is a
+     * previously-public lead whose gallery is no longer published. Both the
+     * row's own path and its deterministic sibling (private/public counterpart)
+     * are removed. Foreign rows and files that merely live under `demo/` are
+     * left untouched.
      *
      * @param  list<string>  $seededGallerySlugs
      */
     private function reconcileStaleGalleryMedia(array $seededGallerySlugs): void
     {
-        $localDisk = Storage::disk(self::LOCAL_DISK);
-        $publicDisk = Storage::disk(self::PUBLIC_DISK);
+        $ownedKeys = $this->demoGalleryKeys();
 
-        // Stale rows: any seeded-namespace media row whose gallery is gone, or
-        // any previously-public row whose gallery is no longer published.
         $candidates = Media::query()
-            ->where(function ($query): void {
-                $query->where('path', 'like', SafeStoragePath::GALLERY_MEDIA_PREFIX.'demo/%')
-                    ->orWhere('path', 'like', self::PUBLIC_DEMO_PREFIX.'%');
-            })
             ->with('gallery')
             ->get();
 
         foreach ($candidates as $media) {
+            $path = (string) $media->path;
+            $match = $this->matchOwnedGalleryMediaPath($path);
+
+            if ($match === null) {
+                continue;
+            }
+
+            [, $key, $slot, $extension] = $match;
+            $key = (string) (int) $key;
+
+            // The path must belong to a real demo gallery key AND that gallery
+            // must exist for the row to be considered demo-owned.
+            if (! in_array($key, $ownedKeys, true)) {
+                continue;
+            }
+
             $gallery = $media->gallery;
             $seeded = $gallery !== null && in_array($gallery->slug, $seededGallerySlugs, true);
             $stillPublic = $media->is_public && $gallery?->status === PublicationStatus::Published;
@@ -226,44 +255,89 @@ class DemoMediaSeeder extends Seeder
                 continue;
             }
 
-            // A row that is no longer seeded, or a previously-public row whose
-            // gallery stopped being published. Delete its file only when it
-            // sits inside the demo namespace (never a hand-uploaded file).
-            $this->deleteDemoFileIfOwned($localDisk, (string) $media->path);
-            $this->deleteDemoFileIfOwned($publicDisk, (string) $media->path);
+            // Remove the row's exact path on either disk plus its deterministic
+            // sibling (the private original or the public lead copy), each only
+            // when the path matches the owned shape.
+            $this->deleteOwnedFile(self::LOCAL_DISK, $path);
+            $this->deleteOwnedFile(self::PUBLIC_DISK, $path);
+            $this->deleteOwnedFile(self::LOCAL_DISK, SafeStoragePath::GALLERY_MEDIA_PREFIX.'demo/'.$key.'/media-'.$slot.'.'.$extension);
+            $this->deleteOwnedFile(self::PUBLIC_DISK, self::PUBLIC_DEMO_PREFIX.$key.'/media-'.$slot.'.'.$extension);
 
             $media->delete();
         }
-
-        // Sweep orphan demo files that no surviving row references (e.g. a
-        // previously-public lead file whose row was reconciled away, or a file
-        // left behind by an earlier demo dataset). Scoped strictly to the
-        // deterministic demo namespaces.
-        $livePaths = Media::query()->pluck('path')->all();
-
-        $this->sweepOrphanDemoFiles($localDisk, rtrim(SafeStoragePath::GALLERY_MEDIA_PREFIX.'demo', '/'), $livePaths);
-        $this->sweepOrphanDemoFiles($publicDisk, rtrim(self::PUBLIC_DEMO_PREFIX, '/'), $livePaths);
     }
 
     /**
-     * Delete demo-namespace files under `$directory` that are not referenced by
-     * any surviving media row.
+     * Gallery keys that identify a real demo gallery: every gallery whose slug
+     * follows the seeder's `galeri-{key}-…` convention. Used to prove that a
+     * `demo/{key}/…` path shape really belongs to a demo gallery.
      *
-     * @param  list<string>  $livePaths
+     * @return list<string>
      */
-    private function sweepOrphanDemoFiles(Filesystem $disk, string $directory, array $livePaths): void
+    private function demoGalleryKeys(): array
     {
-        if (! $disk->directoryExists($directory)) {
+        return Gallery::query()
+            ->where('slug', 'like', 'galeri-%')
+            ->pluck('slug')
+            ->map(static function (string $slug): ?string {
+                return preg_match('#^galeri-(\d+)-#', $slug, $matches) === 1
+                    ? (string) (int) $matches[1]
+                    : null;
+            })
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Match a path against the exact deterministic gallery-media shape this
+     * seeder owns. Returns `[full, key, slot, extension]` or null.
+     *
+     * @return array{0: string, 1: string, 2: string, 3: string}|null
+     */
+    private function matchOwnedGalleryMediaPath(string $path): ?array
+    {
+        if (preg_match(self::GALLERY_MEDIA_PATTERN, $path, $matches) !== 1) {
+            return null;
+        }
+
+        return [$matches[0], $matches[1], $matches[2], $matches[3]];
+    }
+
+    /**
+     * Delete a file only when its path matches an exact deterministic demo
+     * shape this seeder owns, snapshotting the original first so a failure can
+     * restore it.
+     */
+    private function deleteOwnedFile(string $diskName, string $path): void
+    {
+        if (! $this->isOwnedDemoPath($path)) {
             return;
         }
 
-        foreach ($disk->files($directory, true) as $file) {
-            if (in_array($file, $livePaths, true)) {
-                continue;
-            }
+        $disk = Storage::disk($diskName);
 
-            $this->deleteDemoFileIfOwned($disk, $file);
+        if (! $disk->exists($path)) {
+            return;
         }
+
+        $this->snapshot($diskName, $disk, $path);
+
+        if ($disk->delete($path) === false || $disk->exists($path)) {
+            throw new RuntimeException("Gagal menghapus berkas demo usang: {$path}");
+        }
+    }
+
+    /**
+     * Whether a path has one of the exact deterministic shapes this seeder
+     * writes (gallery media or event cover) — the ownership proof used before
+     * any deletion.
+     */
+    private function isOwnedDemoPath(string $path): bool
+    {
+        return preg_match(self::GALLERY_MEDIA_PATTERN, $path) === 1
+            || preg_match(self::EVENT_COVER_PATTERN, $path) === 1;
     }
 
     /**
@@ -297,7 +371,7 @@ class DemoMediaSeeder extends Seeder
 
             $asset = $this->coverAssetFor($path);
 
-            $this->writeFile($localDisk, $path, $this->assetContents($asset), $this->createdLocalFiles);
+            $this->writeFile($localDisk, $path, $this->assetContents($asset));
 
             $mimeType = $this->probeMimeType($localDisk, $path);
 
@@ -310,6 +384,10 @@ class DemoMediaSeeder extends Seeder
     /**
      * Remove demo event-cover files that this seeder previously created but that
      * no longer back a seeded event.
+     *
+     * Ownership is proved by the exact deterministic cover shape
+     * (`private/event-covers/demo/kegiatan-{n}.{ext}`) — a file merely living in
+     * the `demo/` cover directory under any other name is never touched.
      *
      * @param  list<string>  $seededEventSlugs
      */
@@ -338,7 +416,12 @@ class DemoMediaSeeder extends Seeder
                 continue;
             }
 
-            $this->deleteDemoFileIfOwned($localDisk, $file);
+            // Only sweep files whose name is an exact deterministic demo cover.
+            if (preg_match(self::EVENT_COVER_PATTERN, $file) !== 1) {
+                continue;
+            }
+
+            $this->deleteOwnedFile(self::LOCAL_DISK, $file);
         }
     }
 
@@ -422,23 +505,15 @@ class DemoMediaSeeder extends Seeder
      * write by returning `false` rather than raising. Any caller that then
      * probes or deletes the path would otherwise act on a file that was never
      * created (or, worse, destroy a surviving private original), so every write
-     * goes through this guard. The written path is tracked so a later failure
-     * can compensate.
-     *
-     * @param  list<string>  $created
+     * goes through this guard. The pre-run state of the path is snapshotted so a
+     * later failure can restore an overwritten original.
      */
-    private function writeFile(Filesystem $disk, string $path, string $contents, array &$created): void
+    private function writeFile(Filesystem $disk, string $path, string $contents): void
     {
-        $existedBefore = $disk->exists($path);
+        $this->snapshot($this->diskName($disk), $disk, $path);
 
         if ($disk->put($path, $contents) === false || ! $disk->exists($path)) {
             throw new RuntimeException("Gagal menulis berkas media demo: {$path}");
-        }
-
-        // Only track files this run actually created so compensation never
-        // deletes a file that pre-existed the run and was merely overwritten.
-        if (! $existedBefore) {
-            $created[] = $path;
         }
     }
 
@@ -449,8 +524,8 @@ class DemoMediaSeeder extends Seeder
      * Mirroring {@see PublishMediaToPortal}, the destructive delete
      * is sequenced strictly after a verified copy so a failed copy can never
      * leave the record pointing at a public path whose file was never written
-     * while the only real copy was deleted. Both written paths are tracked for
-     * compensation.
+     * while the only real copy was deleted. Both paths are snapshotted so a
+     * later failure restores the exact pre-run state.
      */
     private function copyToPublicDisk(Filesystem $localDisk, Filesystem $publicDisk, string $privatePath, string $publicPath): void
     {
@@ -460,78 +535,72 @@ class DemoMediaSeeder extends Seeder
             throw new RuntimeException("Berkas privat media demo tidak terbaca: {$privatePath}");
         }
 
-        $publicExistedBefore = $publicDisk->exists($publicPath);
+        $this->snapshot(self::PUBLIC_DISK, $publicDisk, $publicPath);
 
         if ($publicDisk->put($publicPath, $contents) === false || ! $publicDisk->exists($publicPath)) {
             throw new RuntimeException("Gagal menyalin media demo ke penyimpanan publik: {$publicPath}");
         }
 
-        if (! $publicExistedBefore) {
-            $this->createdPublicFiles[] = $publicPath;
-        }
+        $this->snapshot(self::LOCAL_DISK, $localDisk, $privatePath);
 
         if ($localDisk->delete($privatePath) === false || $localDisk->exists($privatePath)) {
             throw new RuntimeException("Gagal menghapus berkas privat media demo: {$privatePath}");
         }
-
-        $this->createdLocalFiles = array_values(array_diff($this->createdLocalFiles, [$privatePath]));
     }
 
     /**
-     * Delete a file only when it lives inside one of the deterministic demo
-     * namespaces this seeder owns, and confirm the deletion.
+     * Record the pre-run state (existence + bytes) of a path before this run
+     * modifies it, so a failure can restore it. Only the first snapshot for a
+     * path is kept: the earliest state is the true pre-run state.
      */
-    private function deleteDemoFileIfOwned(Filesystem $disk, string $path): void
+    private function snapshot(string $diskName, Filesystem $disk, string $path): void
     {
-        $isLocalDemo = SafeStoragePath::isSafe($path, [SafeStoragePath::GALLERY_MEDIA_PREFIX]);
-        $isEventDemo = SafeStoragePath::isSafe($path, [SafeStoragePath::EVENT_COVER_PREFIX]);
-        $isPublicDemo = str_starts_with($path, self::PUBLIC_DEMO_PREFIX);
-
-        if (! $isLocalDemo && ! $isEventDemo && ! $isPublicDemo) {
+        if (array_key_exists($path, $this->journal[$diskName] ?? [])) {
             return;
         }
 
-        if (! $disk->exists($path)) {
-            return;
-        }
-
-        if ($disk->delete($path) === false || $disk->exists($path)) {
-            throw new RuntimeException("Gagal menghapus berkas demo usang: {$path}");
-        }
+        $this->journal[$diskName][$path] = $disk->exists($path) ? $disk->get($path) : null;
     }
 
     /**
-     * Remove everything this run created on either disk after a failure, so a
-     * partially-seeded state never leaves orphan files behind. Runs best-effort
-     * for every tracked path and never masks the original exception.
+     * Restore every path this run overwrote or deleted to its exact pre-run
+     * state after a failure: previously existing files get their original
+     * bytes back, and paths that did not exist before are removed. Runs
+     * best-effort for every snapshotted path and never masks the original
+     * exception.
      */
-    private function compensate(): void
+    private function rollbackStorage(): void
     {
-        $localDisk = Storage::disk(self::LOCAL_DISK);
-        $publicDisk = Storage::disk(self::PUBLIC_DISK);
+        foreach ($this->journal as $diskName => $entries) {
+            $disk = Storage::disk($diskName);
 
-        foreach (array_unique($this->createdLocalFiles) as $path) {
-            try {
-                if ($localDisk->exists($path)) {
-                    $localDisk->delete($path);
+            foreach ($entries as $path => $original) {
+                try {
+                    if ($original === null) {
+                        if ($disk->exists($path)) {
+                            $disk->delete($path);
+                        }
+
+                        continue;
+                    }
+
+                    $disk->put($path, $original);
+                } catch (Throwable) {
+                    // Best-effort: the original exception is what matters.
                 }
-            } catch (Throwable) {
-                // Best-effort: the original exception is what matters.
             }
         }
 
-        foreach (array_unique($this->createdPublicFiles) as $path) {
-            try {
-                if ($publicDisk->exists($path)) {
-                    $publicDisk->delete($path);
-                }
-            } catch (Throwable) {
-                // Best-effort.
-            }
-        }
+        $this->journal = [];
+    }
 
-        $this->createdLocalFiles = [];
-        $this->createdPublicFiles = [];
+    /**
+     * Resolve a filesystem instance back to its configured disk name, so
+     * snapshots are journaled per disk.
+     */
+    private function diskName(Filesystem $disk): string
+    {
+        return $disk === Storage::disk(self::LOCAL_DISK) ? self::LOCAL_DISK : self::PUBLIC_DISK;
     }
 
     /**

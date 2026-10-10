@@ -48,6 +48,12 @@ class DemoDatabaseSeederTest extends TestCase
     /** 26 galleries x 4 media rows. */
     private const MEDIA_ROWS = 104;
 
+    /**
+     * The `public` disk instance replaced by a failing-write wrapper, restored
+     * after the test so rollback-written files stay observable.
+     */
+    private ?FilesystemAdapter $originalPublicDisk = null;
+
     public function test_demo_seed_creates_required_organization_shape(): void
     {
         $this->seed(DemoDatabaseSeeder::class);
@@ -1105,6 +1111,117 @@ class DemoDatabaseSeederTest extends TestCase
         );
     }
 
+    public function test_demo_seed_reconciliation_only_removes_exact_deterministic_demo_paths(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        // Foreign/hand-managed files that live inside the same `demo/` namespace
+        // but at paths this seeder never produces: an unknown gallery key
+        // directory, a non-`media-1..4` filename for a real key, and a
+        // non-`kegiatan-<n>` cover name. None of them may be touched.
+        $foreignGalleryFile = 'private/gallery-media/demo/777/manual-keep.png';
+        $foreignGalleryPublicFile = 'public/gallery-media/demo/777/manual-keep.png';
+        $foreignFileName = 'private/gallery-media/demo/1/notes.txt';
+        $foreignCoverFile = 'private/event-covers/demo/manual-keep.jpg';
+        $foreignCoverInNonDemoDir = 'private/event-covers/other/manual-keep.jpg';
+
+        Storage::disk('local')->put($foreignGalleryFile, 'foreign gallery');
+        Storage::disk('public')->put($foreignGalleryPublicFile, 'foreign gallery public');
+        Storage::disk('local')->put($foreignFileName, 'foreign file name');
+        Storage::disk('local')->put($foreignCoverFile, 'foreign cover');
+        Storage::disk('local')->put($foreignCoverInNonDemoDir, 'foreign cover elsewhere');
+
+        // A foreign gallery + media row whose path uses the demo namespace but
+        // whose owner was never seeded. Reconciliation must leave it alone.
+        $foreignUnit = OrganizationUnit::factory()->create([
+            'name' => 'Cabang Asing Kepemilikan',
+            'type' => OrganizationUnitType::Cabang,
+        ]);
+        $foreignGallery = Gallery::factory()->create([
+            'slug' => 'galeri-777-latihan-cabang-asing',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $foreignUnit->id,
+        ]);
+        $foreignMedia = Media::query()->create([
+            'gallery_id' => $foreignGallery->id,
+            'organization_unit_id' => $foreignUnit->id,
+            'disk' => 'local',
+            'path' => $foreignGalleryFile,
+            'mime_type' => 'image/png',
+            'size' => 5,
+            'alt_text' => 'Media asing manual',
+            'is_public' => false,
+            'sort_order' => 1,
+        ]);
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // The foreign row and every foreign file survive the run untouched.
+        $this->assertDatabaseHas('media', ['id' => $foreignMedia->id]);
+        Storage::disk('local')->assertExists($foreignGalleryFile);
+        Storage::disk('public')->assertExists($foreignGalleryPublicFile);
+        Storage::disk('local')->assertExists($foreignFileName);
+        Storage::disk('local')->assertExists($foreignCoverFile);
+        Storage::disk('local')->assertExists($foreignCoverInNonDemoDir);
+    }
+
+    public function test_demo_seed_failure_restores_overwritten_and_deleted_original_files(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        // A gallery the seeder will own and rewrite: plant the exact
+        // deterministic paths with sentinel bytes so we can prove the originals
+        // are restored when a later write fails.
+        $unit = OrganizationUnit::factory()->create([
+            'name' => 'Cabang Pemulihan',
+            'type' => OrganizationUnitType::Cabang,
+        ]);
+        OrganizationUnit::factory()->create([
+            'name' => 'Provinsi Pemulihan',
+            'type' => OrganizationUnitType::Provinsi,
+        ]);
+        $gallery = Gallery::factory()->create([
+            'slug' => 'galeri-01-latihan-cabang-pemulihan',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $unit->id,
+        ]);
+
+        $overwrittenPrivate = 'private/gallery-media/demo/1/media-2.png';
+        $overwrittenPublic = 'public/gallery-media/demo/1/media-1.png';
+        $staleCoverFile = 'private/event-covers/demo/kegiatan-99.jpg';
+
+        Storage::disk('local')->put($overwrittenPrivate, 'ORIGINAL-PRIVATE-BYTES');
+        Storage::disk('public')->put($overwrittenPublic, 'ORIGINAL-PUBLIC-BYTES');
+        Storage::disk('local')->put($staleCoverFile, 'STALE-COVER-BYTES');
+
+        $context = new DemoSeedContext;
+        $context->putPublicationKeys(Gallery::class, [$gallery->slug]);
+        $context->putPublicationKeys(Event::class, []);
+
+        // Fail exactly the next public write, so the overwrite of the public
+        // lead and the stale-cover deletion have already happened before the
+        // failure; the public disk then recovers so rollback can restore bytes.
+        $this->failNextPublicDiskWrite();
+
+        try {
+            app(DemoMediaSeeder::class)->run($context);
+            $this->fail('Seeding must fail loudly when a media write is refused.');
+        } catch (\RuntimeException) {
+            // Expected.
+        } finally {
+            $this->restorePublicDisk();
+        }
+
+        // The originals were restored rather than left overwritten or deleted.
+        $this->assertSame('ORIGINAL-PRIVATE-BYTES', Storage::disk('local')->get($overwrittenPrivate));
+        $this->assertSame('ORIGINAL-PUBLIC-BYTES', Storage::disk('public')->get($overwrittenPublic));
+        $this->assertSame('STALE-COVER-BYTES', Storage::disk('local')->get($staleCoverFile));
+    }
+
     public function test_demo_seed_publishers_are_in_scope_and_distinct_from_submitters(): void
     {
         $this->seed(DemoDatabaseSeeder::class);
@@ -1600,8 +1717,7 @@ class DemoDatabaseSeederTest extends TestCase
         } catch (\RuntimeException) {
             // Expected: the seeder surfaces the storage failure.
         } finally {
-            Storage::set('public', null);
-            Storage::fake('public');
+            $this->restorePublicDisk();
         }
 
         // No media rows survive the failed run (single transaction rolled back)
@@ -1634,23 +1750,61 @@ class DemoDatabaseSeederTest extends TestCase
      */
     private function failPublicDiskWrites(): void
     {
+        $this->installFailingPublicDisk(PHP_INT_MAX);
+    }
+
+    /**
+     * Replace the `public` disk with a wrapper that refuses only the next write
+     * and then delegates to the real adapter, so a rollback that restores
+     * original bytes still succeeds.
+     */
+    private function failNextPublicDiskWrite(): void
+    {
+        $this->installFailingPublicDisk(1);
+    }
+
+    private function installFailingPublicDisk(int $failures): void
+    {
         /** @var FilesystemAdapter $original */
         $original = Storage::disk('public');
+        $this->originalPublicDisk = $original;
 
-        $wrapper = new class($original) extends FilesystemAdapter
+        $wrapper = new class($original, $failures) extends FilesystemAdapter
         {
-            public function __construct(FilesystemAdapter $inner)
+            private int $remainingFailures;
+
+            public function __construct(FilesystemAdapter $inner, int $failures)
             {
                 parent::__construct($inner->getDriver(), $inner->getAdapter(), $inner->getConfig());
+
+                $this->remainingFailures = $failures;
             }
 
             public function put($path, $contents, $options = [])
             {
-                return false;
+                if ($this->remainingFailures > 0) {
+                    $this->remainingFailures--;
+
+                    return false;
+                }
+
+                return parent::put($path, $contents, $options);
             }
         };
 
         Storage::set('public', $wrapper);
+    }
+
+    /**
+     * Restore the original `public` disk instance after a failing-write test so
+     * files written during rollback remain observable.
+     */
+    private function restorePublicDisk(): void
+    {
+        if ($this->originalPublicDisk !== null) {
+            Storage::set('public', $this->originalPublicDisk);
+            $this->originalPublicDisk = null;
+        }
     }
 
     /**
