@@ -2,11 +2,17 @@
 
 namespace Database\Seeders;
 
+use App\Enums\PublicationStatus;
 use App\Models\AuditEvent;
+use App\Models\Event;
+use App\Models\Gallery;
 use App\Models\Membership;
+use App\Models\Page;
+use App\Models\TrainingLocation;
 use App\Models\User;
 use Database\Seeders\Support\DemoSeedContext;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Seeds the workflow audit trail produced alongside the membership and
@@ -31,8 +37,12 @@ class DemoWorkflowSeeder extends Seeder
 
     public function run(DemoSeedContext $context): void
     {
-        $this->seedOperatorAudits($context);
-        $this->seedPublicationAudits($context);
+        // One transaction: a partially-written audit trail must never commit.
+        DB::transaction(function () use ($context): void {
+            $this->seedOperatorAudits($context);
+            $this->seedPublicationAudits($context);
+            $this->seedPublishedContentAudits($context);
+        });
     }
 
     /**
@@ -67,6 +77,12 @@ class DemoWorkflowSeeder extends Seeder
      * assert publication alongside the membership actions. The row is attached
      * to the province unit as its subject; the publication seeders extend the
      * public content in a later task.
+     *
+     * This placeholder deliberately reuses the `organization_profile`
+     * content_type of the real profile Page audit, so the integration test
+     * enumerates the expected published-audit set by content_type and carves
+     * this synthetic row out (see DemoDatabaseSeederTest). Change the
+     * content_type here and that carve-out must change with it.
      */
     private function seedPublicationAudits(DemoSeedContext $context): void
     {
@@ -95,6 +111,62 @@ class DemoWorkflowSeeder extends Seeder
                 'metadata' => $metadata,
             ],
         );
+    }
+
+    /**
+     * Attach a `content.published` audit row to every published Page, Event,
+     * TrainingLocation, and Gallery created by {@see DemoPublicationSeeder},
+     * matching what PublishContent persists.
+     *
+     * The seeded records are identified by the deterministic natural keys the
+     * publication seeder recorded in the shared context, never by an unscoped
+     * `where('status', published)` query, so running the demo seed can never
+     * rewrite the audit history of an unrelated local row.
+     */
+    private function seedPublishedContentAudits(DemoSeedContext $context): void
+    {
+        $this->auditPublished(Page::class, 'page', 'slug', $context->publicationKeys(Page::class));
+        $this->auditPublished(Event::class, 'event', 'slug', $context->publicationKeys(Event::class));
+        $this->auditPublished(TrainingLocation::class, 'training_location', 'slug', $context->publicationKeys(TrainingLocation::class));
+        $this->auditPublished(Gallery::class, 'gallery', 'slug', $context->publicationKeys(Gallery::class));
+    }
+
+    /**
+     * Write one `content.published` audit per published seeded record of a
+     * given model, identified by the recorded natural key column.
+     *
+     * @param  class-string  $modelClass
+     * @param  list<string>  $keys
+     */
+    private function auditPublished(string $modelClass, string $contentType, string $keyColumn, array $keys): void
+    {
+        if ($keys === []) {
+            return;
+        }
+
+        $records = $modelClass::query()
+            ->whereIn($keyColumn, $keys)
+            ->where('status', PublicationStatus::Published)
+            ->get();
+
+        foreach ($records as $record) {
+            AuditEvent::query()->updateOrCreate(
+                [
+                    'subject_type' => $record->getMorphClass(),
+                    'subject_id' => $record->id,
+                    'action' => 'content.published',
+                ],
+                [
+                    'actor_id' => $record->published_by_id ?? $record->submitted_by_id,
+                    'metadata' => [
+                        'content_type' => $contentType,
+                        'slug' => $record->{$keyColumn},
+                        'content_id' => $record->id,
+                        'published_at' => $record->published_at?->toDateTimeString(),
+                    ],
+                ],
+            );
+        }
     }
 
     /**

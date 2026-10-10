@@ -28,6 +28,15 @@ class DemoSeedContext
      */
     private array $operators = [];
 
+    /**
+     * Deterministic natural keys of seeded publication records, grouped by
+     * model class. Later seeders (e.g. the workflow seeder) use these to scope
+     * their side effects to records this run created, never to unrelated rows.
+     *
+     * @var array<class-string, list<string>>
+     */
+    private array $publicationKeys = [];
+
     public function province(): OrganizationUnit
     {
         return $this->province ?? throw new LogicException('Konteks demo belum memiliki unit provinsi.');
@@ -101,6 +110,28 @@ class DemoSeedContext
     public function operators(): array
     {
         return $this->operators;
+    }
+
+    /**
+     * Record the deterministic natural keys of a seeded publication model.
+     *
+     * @param  class-string  $modelClass
+     * @param  list<string>  $keys
+     */
+    public function putPublicationKeys(string $modelClass, array $keys): void
+    {
+        $this->publicationKeys[$modelClass] = array_values($keys);
+    }
+
+    /**
+     * The deterministic natural keys recorded for a seeded publication model.
+     *
+     * @param  class-string  $modelClass
+     * @return list<string>
+     */
+    public function publicationKeys(string $modelClass): array
+    {
+        return $this->publicationKeys[$modelClass] ?? [];
     }
 
     /**
