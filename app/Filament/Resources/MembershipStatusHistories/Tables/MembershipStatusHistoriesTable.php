@@ -21,14 +21,33 @@ class MembershipStatusHistoriesTable
                 TextColumn::make('from_status')
                     ->label('Dari')
                     ->badge()
-                    ->formatStateUsing(fn (mixed $state): string => $state ? (MembershipStatus::tryFrom((string) $state)?->label() ?? (string) $state) : '—'),
+                    ->formatStateUsing(fn (mixed $state): string => self::statusLabel($state)),
                 TextColumn::make('to_status')
                     ->label('Ke')
                     ->badge()
-                    ->formatStateUsing(fn (mixed $state): string => MembershipStatus::tryFrom((string) $state)?->label() ?? (string) $state),
+                    ->formatStateUsing(fn (mixed $state): string => self::statusLabel($state)),
                 TextColumn::make('actor.name')->label('Pelaku'),
                 TextColumn::make('created_at')->label('Waktu')->dateTime(),
             ])
             ->emptyStateHeading('Belum ada riwayat status');
+    }
+
+    /**
+     * The `from_status`/`to_status` columns are cast to a `MembershipStatus`
+     * enum by the model, so the column state arrives as an enum instance (or
+     * null), never a raw scalar. Render its Indonesian label; fall back to the
+     * raw value for any unexpected scalar so the table never throws.
+     */
+    private static function statusLabel(mixed $state): string
+    {
+        if ($state instanceof MembershipStatus) {
+            return $state->label();
+        }
+
+        if ($state === null || $state === '') {
+            return '—';
+        }
+
+        return MembershipStatus::tryFrom((string) $state)?->label() ?? (string) $state;
     }
 }
