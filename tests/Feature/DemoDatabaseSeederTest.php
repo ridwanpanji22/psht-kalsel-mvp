@@ -9,6 +9,7 @@ use App\Enums\MembershipType;
 use App\Enums\PublicationStatus;
 use App\Models\ApprovalRequest;
 use App\Models\AuditEvent;
+use App\Models\DemoArtifact;
 use App\Models\Event;
 use App\Models\Gallery;
 use App\Models\Media;
@@ -1111,35 +1112,36 @@ class DemoDatabaseSeederTest extends TestCase
         );
     }
 
-    public function test_demo_seed_reconciliation_only_removes_exact_deterministic_demo_paths(): void
+    public function test_demo_seed_reconciliation_only_removes_manifest_owned_demo_artifacts(): void
     {
         Storage::fake('local');
         Storage::fake('public');
 
-        // Foreign/hand-managed files that live inside the same `demo/` namespace
-        // but at paths this seeder never produces: an unknown gallery key
-        // directory, a non-`media-1..4` filename for a real key, and a
-        // non-`kegiatan-<n>` cover name. None of them may be touched.
-        $foreignGalleryFile = 'private/gallery-media/demo/777/manual-keep.png';
-        $foreignGalleryPublicFile = 'public/gallery-media/demo/777/manual-keep.png';
-        $foreignFileName = 'private/gallery-media/demo/1/notes.txt';
-        $foreignCoverFile = 'private/event-covers/demo/manual-keep.jpg';
-        $foreignCoverInNonDemoDir = 'private/event-covers/other/manual-keep.jpg';
+        // Foreign/hand-managed files placed at the *exact* deterministic demo
+        // path shapes this seeder produces, but under keys/names this seed never
+        // produces (gallery key 99 is not seeded; cover kegiatan-98 is outside
+        // the seeded 01..39 range). None has a manifest entry, so none may be
+        // touched.
+        $foreignLeadPrivate = 'private/gallery-media/demo/99/media-1.png';
+        $foreignLeadPublic = 'public/gallery-media/demo/99/media-1.png';
+        $foreignSlot = 'private/gallery-media/demo/99/media-3.webp';
+        $foreignCover = 'private/event-covers/demo/kegiatan-98.jpg';
+        $foreignUnknownKey = 'private/gallery-media/demo/777/manual-keep.png';
 
-        Storage::disk('local')->put($foreignGalleryFile, 'foreign gallery');
-        Storage::disk('public')->put($foreignGalleryPublicFile, 'foreign gallery public');
-        Storage::disk('local')->put($foreignFileName, 'foreign file name');
-        Storage::disk('local')->put($foreignCoverFile, 'foreign cover');
-        Storage::disk('local')->put($foreignCoverInNonDemoDir, 'foreign cover elsewhere');
+        Storage::disk('local')->put($foreignLeadPrivate, 'foreign lead private');
+        Storage::disk('public')->put($foreignLeadPublic, 'foreign lead public');
+        Storage::disk('local')->put($foreignSlot, 'foreign slot');
+        Storage::disk('local')->put($foreignCover, 'foreign cover');
+        Storage::disk('local')->put($foreignUnknownKey, 'foreign unknown key');
 
-        // A foreign gallery + media row whose path uses the demo namespace but
-        // whose owner was never seeded. Reconciliation must leave it alone.
+        // Foreign gallery + media row at an *exact-shaped* demo path (key 99),
+        // never registered in the manifest and never seeded.
         $foreignUnit = OrganizationUnit::factory()->create([
             'name' => 'Cabang Asing Kepemilikan',
             'type' => OrganizationUnitType::Cabang,
         ]);
         $foreignGallery = Gallery::factory()->create([
-            'slug' => 'galeri-777-latihan-cabang-asing',
+            'slug' => 'galeri-99-latihan-cabang-asing',
             'status' => PublicationStatus::Published,
             'published_at' => now(),
             'organization_unit_id' => $foreignUnit->id,
@@ -1148,7 +1150,7 @@ class DemoDatabaseSeederTest extends TestCase
             'gallery_id' => $foreignGallery->id,
             'organization_unit_id' => $foreignUnit->id,
             'disk' => 'local',
-            'path' => $foreignGalleryFile,
+            'path' => $foreignLeadPrivate,
             'mime_type' => 'image/png',
             'size' => 5,
             'alt_text' => 'Media asing manual',
@@ -1158,13 +1160,47 @@ class DemoDatabaseSeederTest extends TestCase
 
         $this->seed(DemoDatabaseSeeder::class);
 
-        // The foreign row and every foreign file survive the run untouched.
+        // No manifest row was ever created for a foreign artifact...
+        $this->assertSame(
+            0,
+            DemoArtifact::query()->whereIn('path', [
+                $foreignLeadPrivate, $foreignLeadPublic, $foreignSlot, $foreignCover, $foreignUnknownKey,
+            ])->count(),
+            'The manifest must never claim a foreign artifact.',
+        );
+
+        // ...so the foreign row and every foreign file survive the run.
         $this->assertDatabaseHas('media', ['id' => $foreignMedia->id]);
-        Storage::disk('local')->assertExists($foreignGalleryFile);
-        Storage::disk('public')->assertExists($foreignGalleryPublicFile);
-        Storage::disk('local')->assertExists($foreignFileName);
-        Storage::disk('local')->assertExists($foreignCoverFile);
-        Storage::disk('local')->assertExists($foreignCoverInNonDemoDir);
+        Storage::disk('local')->assertExists($foreignLeadPrivate);
+        Storage::disk('public')->assertExists($foreignLeadPublic);
+        Storage::disk('local')->assertExists($foreignSlot);
+        Storage::disk('local')->assertExists($foreignCover);
+        Storage::disk('local')->assertExists($foreignUnknownKey);
+    }
+
+    public function test_demo_seed_manifest_is_idempotent_across_reruns(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $firstArtifacts = DemoArtifact::query()
+            ->orderBy('disk')->orderBy('path')
+            ->get(['namespace', 'disk', 'path', 'kind', 'seed_key', 'owner_type', 'owner_id'])
+            ->toArray();
+
+        $this->assertNotEmpty($firstArtifacts, 'The run must register owned artifacts.');
+
+        // Rerun the whole demo seed: the manifest converges, never duplicates.
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $secondArtifacts = DemoArtifact::query()
+            ->orderBy('disk')->orderBy('path')
+            ->get(['namespace', 'disk', 'path', 'kind', 'seed_key', 'owner_type', 'owner_id'])
+            ->toArray();
+
+        $this->assertSame($firstArtifacts, $secondArtifacts, 'Reruns must not duplicate or drift manifest rows.');
     }
 
     public function test_demo_seed_failure_restores_overwritten_and_deleted_original_files(): void
@@ -1174,7 +1210,7 @@ class DemoDatabaseSeederTest extends TestCase
 
         // A gallery the seeder will own and rewrite: plant the exact
         // deterministic paths with sentinel bytes so we can prove the originals
-        // are restored when a later write fails.
+        // are restored when a pre-commit failure happens after a promotion.
         $unit = OrganizationUnit::factory()->create([
             'name' => 'Cabang Pemulihan',
             'type' => OrganizationUnitType::Cabang,
@@ -1192,34 +1228,92 @@ class DemoDatabaseSeederTest extends TestCase
 
         $overwrittenPrivate = 'private/gallery-media/demo/1/media-2.png';
         $overwrittenPublic = 'public/gallery-media/demo/1/media-1.png';
-        $staleCoverFile = 'private/event-covers/demo/kegiatan-99.jpg';
 
         Storage::disk('local')->put($overwrittenPrivate, 'ORIGINAL-PRIVATE-BYTES');
         Storage::disk('public')->put($overwrittenPublic, 'ORIGINAL-PUBLIC-BYTES');
-        Storage::disk('local')->put($staleCoverFile, 'STALE-COVER-BYTES');
 
         $context = new DemoSeedContext;
         $context->putPublicationKeys(Gallery::class, [$gallery->slug]);
         $context->putPublicationKeys(Event::class, []);
 
-        // Fail exactly the next public write, so the overwrite of the public
-        // lead and the stale-cover deletion have already happened before the
-        // failure; the public disk then recovers so rollback can restore bytes.
-        $this->failNextPublicDiskWrite();
+        // Fail the public promotion (final-path writes, never the staged temp
+        // writes) so the local promotion has already overwritten its original
+        // before the run aborts; rollback must restore both.
+        $this->failPublicFinalPathWrites();
 
         try {
             app(DemoMediaSeeder::class)->run($context);
             $this->fail('Seeding must fail loudly when a media write is refused.');
-        } catch (\RuntimeException) {
-            // Expected.
+        } catch (\RuntimeException $exception) {
+            // Expected: the promotion failure surfaces.
+            $this->assertStringContainsString('promosikan', $exception->getMessage());
         } finally {
             $this->restorePublicDisk();
         }
 
-        // The originals were restored rather than left overwritten or deleted.
+        // The originals were restored rather than left overwritten.
         $this->assertSame('ORIGINAL-PRIVATE-BYTES', Storage::disk('local')->get($overwrittenPrivate));
         $this->assertSame('ORIGINAL-PUBLIC-BYTES', Storage::disk('public')->get($overwrittenPublic));
-        $this->assertSame('STALE-COVER-BYTES', Storage::disk('local')->get($staleCoverFile));
+
+        // No media rows or manifest rows committed.
+        $this->assertSame(0, Media::query()->count(), 'A failed run must not commit media rows.');
+        $this->assertSame(0, DemoArtifact::query()->count(), 'A failed run must not commit manifest rows.');
+    }
+
+    public function test_demo_seed_surfaces_a_distinct_failure_when_compensation_cannot_restore(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $unit = OrganizationUnit::factory()->create([
+            'name' => 'Cabang Gagal Pulih',
+            'type' => OrganizationUnitType::Cabang,
+        ]);
+        OrganizationUnit::factory()->create([
+            'name' => 'Provinsi Gagal Pulih',
+            'type' => OrganizationUnitType::Provinsi,
+        ]);
+        $gallery = Gallery::factory()->create([
+            'slug' => 'galeri-01-latihan-cabang-gagal-pulih',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $unit->id,
+        ]);
+
+        $overwrittenPrivate = 'private/gallery-media/demo/1/media-2.png';
+        $overwrittenPublic = 'public/gallery-media/demo/1/media-1.png';
+        Storage::disk('local')->put($overwrittenPrivate, 'ORIGINAL-PRIVATE-BYTES');
+        Storage::disk('public')->put($overwrittenPublic, 'ORIGINAL-PUBLIC-BYTES');
+
+        $context = new DemoSeedContext;
+        $context->putPublicationKeys(Gallery::class, [$gallery->slug]);
+        $context->putPublicationKeys(Event::class, []);
+
+        // Fail both the public promotion and every subsequent public write, so
+        // rollback's attempt to restore the already-promoted public original
+        // also fails — a restoration failure that must be surfaced distinctly.
+        $this->failAllPublicFinalPathWrites();
+
+        try {
+            app(DemoMediaSeeder::class)->run($context);
+            $this->fail('Seeding must fail when storage cannot be restored.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString(
+                'Gagal memulihkan berkas media demo',
+                $exception->getMessage(),
+                'A failed restoration must raise a distinct hard failure.',
+            );
+        } finally {
+            $this->restorePublicDisk();
+        }
+
+        // The local original is restored and the public original is unchanged
+        // (the failed promotion never wrote over it); no DB state diverges from
+        // the reported failure.
+        $this->assertSame('ORIGINAL-PRIVATE-BYTES', Storage::disk('local')->get($overwrittenPrivate));
+        $this->assertSame('ORIGINAL-PUBLIC-BYTES', Storage::disk('public')->get($overwrittenPublic));
+        $this->assertSame(0, Media::query()->count());
+        $this->assertSame(0, DemoArtifact::query()->count());
     }
 
     public function test_demo_seed_publishers_are_in_scope_and_distinct_from_submitters(): void
@@ -1576,27 +1670,29 @@ class DemoDatabaseSeederTest extends TestCase
         }
     }
 
-    public function test_demo_seed_reconciles_stale_demo_media_and_covers_on_rerun(): void
+    public function test_demo_seed_reconciles_only_manifest_owned_stale_artifacts_on_rerun(): void
     {
         Storage::fake('local');
         Storage::fake('public');
 
-        // First run: full demo dataset, so real demo rows/files exist.
+        // First run: full demo dataset, so real demo rows/files exist and their
+        // manifest entries are registered.
         $this->seed(DemoDatabaseSeeder::class);
 
         // Snapshot a gallery and an event that the publication seeder seeded.
         $gallery = Gallery::query()->where('status', PublicationStatus::Published)->firstOrFail();
         $event = Event::query()->whereNotNull('cover_path')->firstOrFail();
 
-        // A stale demo row/file that is no longer owned by any seeded key, plus
-        // an unrelated hand-managed file that must survive.
-        $staleLocalPath = 'private/gallery-media/demo/999/media-1.png';
-        $stalePublicPath = 'public/gallery-media/demo/999/media-1.png';
-        $staleCoverPath = 'private/event-covers/demo/kegiatan-999.jpg';
+        // Foreign/hand-managed stale artifacts with no manifest entry: they use
+        // demo-shaped paths but this seeder never registered them, so they must
+        // survive even though their key/event is not in the seeded set.
+        $foreignStaleLocal = 'private/gallery-media/demo/999/media-1.png';
+        $foreignStalePublic = 'public/gallery-media/demo/999/media-1.png';
+        $foreignStaleCover = 'private/event-covers/demo/kegiatan-999.jpg';
 
-        Storage::disk('local')->put($staleLocalPath, 'stale');
-        Storage::disk('public')->put($stalePublicPath, 'stale');
-        Storage::disk('local')->put($staleCoverPath, 'stale');
+        Storage::disk('local')->put($foreignStaleLocal, 'stale');
+        Storage::disk('public')->put($foreignStalePublic, 'stale');
+        Storage::disk('local')->put($foreignStaleCover, 'stale');
         Storage::disk('local')->put('private/gallery-media/manual-keep.png', 'keep');
         Storage::disk('public')->put('public/gallery-media/manual-keep.png', 'keep');
 
@@ -1604,17 +1700,17 @@ class DemoDatabaseSeederTest extends TestCase
             'name' => 'Unit Usang',
             'type' => OrganizationUnitType::Cabang,
         ]);
-        $staleGallery = Gallery::factory()->create([
+        $foreignStaleGallery = Gallery::factory()->create([
             'slug' => 'galeri-999-latihan-unit-usang',
             'status' => PublicationStatus::Published,
             'published_at' => now(),
             'organization_unit_id' => $foreignUnit->id,
         ]);
-        Media::query()->create([
-            'gallery_id' => $staleGallery->id,
+        $foreignStaleMedia = Media::query()->create([
+            'gallery_id' => $foreignStaleGallery->id,
             'organization_unit_id' => $foreignUnit->id,
             'disk' => 'local',
-            'path' => $staleLocalPath,
+            'path' => $foreignStaleLocal,
             'mime_type' => 'image/png',
             'size' => 5,
             'alt_text' => 'Media usang',
@@ -1623,8 +1719,8 @@ class DemoDatabaseSeederTest extends TestCase
         ]);
 
         // Drive the media seeder with a context that (a) no longer lists the
-        // stale gallery/event and (b) lists the tracked gallery as draft, so the
-        // previously-public lead row/file must be reconciled away.
+        // tracked gallery's previous published state (it is now draft) and
+        // (b) lists no events, so the manifest-owned lead + covers reconcile.
         $gallery->update(['status' => PublicationStatus::Draft, 'published_by_id' => null, 'published_at' => null]);
 
         $context = new DemoSeedContext;
@@ -1633,14 +1729,7 @@ class DemoDatabaseSeederTest extends TestCase
 
         app(DemoMediaSeeder::class)->run($context);
 
-        // Stale demo row + files and stale cover are gone.
-        $this->assertSame(0, Media::query()->where('gallery_id', $staleGallery->id)->count(), 'Stale demo media row must be removed.');
-        Storage::disk('local')->assertMissing($staleLocalPath);
-        Storage::disk('public')->assertMissing($stalePublicPath);
-        Storage::disk('local')->assertMissing($staleCoverPath);
-
-        // The tracked gallery no longer carries public media, and its public
-        // lead file has been reconciled away.
+        // The manifest-owned public lead of the now-draft gallery is gone.
         $this->assertSame(
             0,
             Media::query()->where('gallery_id', $gallery->id)->where('is_public', true)->count(),
@@ -1648,8 +1737,14 @@ class DemoDatabaseSeederTest extends TestCase
         );
         Storage::disk('public')->assertMissing('public/gallery-media/demo/'.$this->galleryKeyFor($gallery->slug).'/media-1.png');
 
-        // The tracked event's cover is now stale (event key set empty) and gone.
+        // The manifest-owned cover of the now-unseeded event is gone.
         Storage::disk('local')->assertMissing((string) $event->cover_path);
+
+        // Foreign artifacts with no manifest proof survive untouched.
+        $this->assertDatabaseHas('media', ['id' => $foreignStaleMedia->id]);
+        Storage::disk('local')->assertExists($foreignStaleLocal);
+        Storage::disk('public')->assertExists($foreignStalePublic);
+        Storage::disk('local')->assertExists($foreignStaleCover);
 
         // Unrelated hand-managed files survive untouched.
         Storage::disk('local')->assertExists('private/gallery-media/manual-keep.png');
@@ -1750,41 +1845,68 @@ class DemoDatabaseSeederTest extends TestCase
      */
     private function failPublicDiskWrites(): void
     {
-        $this->installFailingPublicDisk(PHP_INT_MAX);
+        $this->installFailingPublicDisk(static fn (string $path): bool => true);
     }
 
     /**
-     * Replace the `public` disk with a wrapper that refuses only the next write
-     * and then delegates to the real adapter, so a rollback that restores
-     * original bytes still succeeds.
+     * Fail the first `public` write to a *final* path (never the staged temp
+     * path) and let later writes through, so staging succeeds, the first
+     * promotion aborts the run (after the local disk's promotion already
+     * overwrote its originals), and rollback's restore write can land.
      */
-    private function failNextPublicDiskWrite(): void
+    private function failPublicFinalPathWrites(): void
     {
-        $this->installFailingPublicDisk(1);
+        $failed = false;
+
+        $this->installFailingPublicDisk(
+            static function (string $path) use (&$failed): bool {
+                if ($failed || str_contains(basename($path), '.tmp-')) {
+                    return false;
+                }
+
+                $failed = true;
+
+                return true;
+            },
+        );
     }
 
-    private function installFailingPublicDisk(int $failures): void
+    /**
+     * Fail every `public` write to a *final* path (never the staged temp path),
+     * so promotion and any subsequent restore write on the public disk both
+     * fail — exercising the restoration-failure hard path.
+     */
+    private function failAllPublicFinalPathWrites(): void
+    {
+        $this->installFailingPublicDisk(
+            static fn (string $path): bool => ! str_contains(basename($path), '.tmp-'),
+        );
+    }
+
+    /**
+     * @param  callable(string): bool  $shouldFail
+     */
+    private function installFailingPublicDisk(callable $shouldFail): void
     {
         /** @var FilesystemAdapter $original */
         $original = Storage::disk('public');
         $this->originalPublicDisk = $original;
 
-        $wrapper = new class($original, $failures) extends FilesystemAdapter
+        $wrapper = new class($original, $shouldFail) extends FilesystemAdapter
         {
-            private int $remainingFailures;
+            /** @var callable(string): bool */
+            private $shouldFail;
 
-            public function __construct(FilesystemAdapter $inner, int $failures)
+            public function __construct(FilesystemAdapter $inner, callable $shouldFail)
             {
                 parent::__construct($inner->getDriver(), $inner->getAdapter(), $inner->getConfig());
 
-                $this->remainingFailures = $failures;
+                $this->shouldFail = $shouldFail;
             }
 
             public function put($path, $contents, $options = [])
             {
-                if ($this->remainingFailures > 0) {
-                    $this->remainingFailures--;
-
+                if (($this->shouldFail)($path)) {
                     return false;
                 }
 
