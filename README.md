@@ -48,15 +48,21 @@ A deterministic demo dataset powers local presentations without any real identit
 Firebase credential. It is produced by `DatabaseSeeder` → `DemoDatabaseSeeder` and
 refuses to run when `APP_ENV=production`.
 
+Local runbook (on a disposable local database):
+
 ```bash
-php artisan migrate          # on a clean local SQLite/MySQL database
-php artisan db:seed          # seeds the full demo dataset
+php artisan migrate          # create the schema on a clean local SQLite/MySQL database
+php artisan db:seed          # seeds the full demo dataset (idempotent by natural key)
+php artisan storage:link     # expose storage/app/public so public gallery media resolves
 ```
 
-> **Reset warning:** the seeder never runs `migrate:fresh` and never deletes rows. To
-> re-seed from scratch, reset the demo database explicitly (`php artisan migrate:fresh`
-> **only** on a disposable local database), then `php artisan db:seed` again. Reruns on an
-> already-seeded database update records by natural key instead of duplicating them.
+> **Reset warning — explicit and destructive.** Resetting is a deliberate, destructive
+> step you run yourself; the seeders never do it for you. `DemoDatabaseSeeder` (and
+> `DatabaseSeeder`) never run `migrate:fresh` and never delete rows. To re-seed from
+> scratch, reset the demo database explicitly — either replace the local SQLite file or run
+> `php artisan migrate:fresh` **only** on a disposable local database — then `php artisan
+> db:seed` again. Reruns on an already-seeded database update records by natural key
+> instead of duplicating them.
 
 Demo operators (one per organization unit; 1 province + 13 branches + 65 rantings +
 208 rayons + 13 UKM + 13 komisariat = **313 accounts**):
@@ -67,6 +73,11 @@ Demo operators (one per organization unit; 1 province + 13 branches + 65 ranting
 - **Shared password:** `PshtKalsel@1922` (local demo only — never use in production).
 - Every account is active, onboarded, carries a unique dummy `firebase_uid`, and has an
   active assignment on its unit.
+
+> **Do not reuse these credentials anywhere but local SQLite.** They are fixed, shared, and
+> documented here on purpose; they are not secrets. Never point the demo seeder or demo
+> login at a shared, staging, or production database, and never enable them outside
+> `APP_ENV=local`/`testing`.
 
 Because the dummy Firebase UIDs cannot authenticate against real Firebase, the server
 exposes a guarded, password-based demo login for local presentation. It is **disabled by

@@ -78,6 +78,7 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 ## Artisan
 
 - Run Artisan commands directly via the command line (e.g., `php artisan route:list`). Use `php artisan list` to discover available commands and `php artisan [command] --help` to check parameters.
+- Local demo dataset: `php artisan migrate && php artisan db:seed && php artisan storage:link` builds the deterministic MVP demo data (313 demo operators, memberships, publications, and local media). `DatabaseSeeder` → `DemoDatabaseSeeder` refuses to run when `APP_ENV=production`, never runs `migrate:fresh`, and never deletes rows; reset the local database explicitly yourself. Demo login is disabled unless `APP_ENV=local` (or `testing`) **and** `DEMO_AUTH_ENABLED=true`. See `README.md` → "Demo dataset and local demo login".
 - Inspect routes with `php artisan route:list`. Filter with: `--method=GET`, `--name=users`, `--path=api`, `--except-vendor`, `--only-vendor`.
 - Read configuration values using dot notation: `php artisan config:show app.name`, `php artisan config:show database.default`. Or read config files directly from the `config/` directory.
 

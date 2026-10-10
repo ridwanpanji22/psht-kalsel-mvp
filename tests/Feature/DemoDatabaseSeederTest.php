@@ -1935,6 +1935,351 @@ class DemoDatabaseSeederTest extends TestCase
         $this->assertSame(self::MEDIA_ROWS, Media::query()->count());
     }
 
+    // ---------------------------------------------------------------------
+    // End-to-end rerun safety and cross-domain invariants (Task 7)
+    // ---------------------------------------------------------------------
+
+    /**
+     * Rerun safety, end to end: run the full demo seeder twice against the same
+     * database and compare row counts per table *and* the natural-key sets.
+     *
+     * A rerun must be idempotent by natural key — no duplicate email, slug,
+     * member number, unit natural key, gallery media path, assignment, or audit
+     * record. Counts alone could hide a swap, so the distinct natural-key sets
+     * are compared too.
+     */
+    public function test_demo_seed_rerun_preserves_counts_and_natural_key_sets(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+        $firstCounts = $this->tableCounts();
+        $firstKeys = $this->naturalKeySets();
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // 1. No table grew or shrank.
+        $this->assertSame($firstCounts, $this->tableCounts(), 'A rerun must not change any table row count.');
+
+        // 2. The natural-key sets are identical, not merely equal in size.
+        $this->assertSame($firstKeys, $this->naturalKeySets(), 'A rerun must preserve every natural-key set.');
+
+        // 3. Each natural key is genuinely unique on its own table.
+        $this->assertSame(
+            User::query()->count(),
+            User::query()->distinct()->count('email'),
+            'Seeded operator emails must be unique.',
+        );
+        $this->assertSame(
+            Membership::query()->whereNotNull('member_number')->count(),
+            Membership::query()->whereNotNull('member_number')->distinct()->count('member_number'),
+            'Seeded member numbers must be unique.',
+        );
+        $this->assertSame(
+            Media::query()->count(),
+            Media::query()->distinct()->count('path'),
+            'Seeded gallery media paths must be unique.',
+        );
+
+        // 4. Unit natural keys are unique per type (the composite key the seeder
+        //    upserts on) and the operator/assignment keys never duplicate.
+        foreach (OrganizationUnitType::cases() as $type) {
+            $units = OrganizationUnit::query()->where('type', $type)->get();
+            $keys = $units->map(fn (OrganizationUnit $unit): string => $unit->name.'|'.($unit->parent_id ?? 'root'));
+
+            $this->assertSame(
+                $units->count(),
+                $keys->unique()->count(),
+                "Unit natural keys for {$type->value} must be unique.",
+            );
+        }
+
+        $assignmentKeys = UnitAssignment::query()->get()
+            ->map(fn (UnitAssignment $assignment): string => $assignment->user_id.'|'.$assignment->organization_unit_id.'|'.$assignment->role);
+        $this->assertSame(
+            $assignmentKeys->count(),
+            $assignmentKeys->unique()->count(),
+            'Seeded unit assignments must be unique per user/unit/role.',
+        );
+
+        $mediaKeys = Media::query()->get()
+            ->map(fn (Media $media): string => $media->gallery_id.'|'.$media->sort_order);
+        $this->assertSame(
+            $mediaKeys->count(),
+            $mediaKeys->unique()->count(),
+            'Seeded gallery media must be unique per gallery/sort order.',
+        );
+    }
+
+    /**
+     * Cross-domain ownership: every event/gallery/training-location owner is a
+     * seeded organization unit, and every seeded unit is reachable in the
+     * hierarchy seed (never an orphan planted by another process).
+     */
+    public function test_demo_seed_content_owners_are_seeded_units(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $seededUnitIds = OrganizationUnit::query()->pluck('id')->all();
+
+        foreach ([Event::class, Gallery::class, TrainingLocation::class] as $modelClass) {
+            $ownerIds = $modelClass::query()->pluck('organization_unit_id')->unique()->all();
+
+            $this->assertNotEmpty($ownerIds, "{$modelClass} must be owned by at least one unit.");
+
+            foreach ($ownerIds as $ownerId) {
+                $this->assertContains(
+                    $ownerId,
+                    $seededUnitIds,
+                    "{$modelClass} owner {$ownerId} must be a seeded organization unit.",
+                );
+            }
+        }
+    }
+
+    /**
+     * Cross-domain actors: every submitter, publisher, membership auditor, and
+     * approval requester/reviewer is a seeded operator holding an active
+     * assignment, so every workflow row points at a real, in-scope operator.
+     */
+    public function test_demo_seed_workflow_actors_hold_valid_assignments(): void
+    {
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $assertActiveOperator = function (?int $userId, string $label): void {
+            if ($userId === null) {
+                return;
+            }
+
+            $this->assertNotNull(
+                User::query()->find($userId),
+                "{$label} user #{$userId} must exist.",
+            );
+            $this->assertTrue(
+                UnitAssignment::query()
+                    ->where('user_id', $userId)
+                    ->where('is_active', true)
+                    ->exists(),
+                "{$label} user #{$userId} must hold an active assignment.",
+            );
+        };
+
+        // Publication submitters/publishers across every content type.
+        foreach ([Page::class, Event::class, TrainingLocation::class, Gallery::class] as $modelClass) {
+            foreach ($modelClass::query()->get() as $row) {
+                $assertActiveOperator($row->submitted_by_id, "{$modelClass}#{$row->id} submitter");
+                $assertActiveOperator($row->published_by_id, "{$modelClass}#{$row->id} publisher");
+            }
+        }
+
+        // Membership-status auditors.
+        foreach (MembershipStatusHistory::query()->get() as $history) {
+            $assertActiveOperator($history->actor_id, "MembershipStatusHistory#{$history->id} actor");
+        }
+
+        // Approval requester/reviewer.
+        foreach (ApprovalRequest::query()->get() as $request) {
+            $assertActiveOperator($request->requested_by_id, "ApprovalRequest#{$request->id} requester");
+            $assertActiveOperator($request->reviewed_by_id, "ApprovalRequest#{$request->id} reviewer");
+        }
+    }
+
+    /**
+     * Cross-domain media invariants: every media row's `organization_unit_id`
+     * matches its gallery owner, and every published gallery exposes at least
+     * one public media row on the public disk.
+     */
+    public function test_demo_seed_media_ownership_and_published_gallery_public_media(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        // Media ownership always mirrors the gallery owner.
+        foreach (Media::query()->with('gallery')->get() as $media) {
+            $this->assertNotNull($media->gallery, "Media #{$media->id} must belong to a gallery.");
+            $this->assertSame(
+                $media->gallery->organization_unit_id,
+                $media->organization_unit_id,
+                "Media #{$media->id} must be owned by the same unit as its gallery.",
+            );
+        }
+
+        // Every published gallery has at least one public media row, and every
+        // public media row belongs to a published gallery.
+        foreach (Gallery::query()->where('status', PublicationStatus::Published)->get() as $gallery) {
+            $this->assertGreaterThanOrEqual(
+                1,
+                $gallery->media()->where('is_public', true)->where('disk', 'public')->count(),
+                "Published gallery {$gallery->slug} must expose at least one public media row.",
+            );
+        }
+
+        $this->assertSame(
+            0,
+            Media::query()
+                ->where('is_public', true)
+                ->whereHas('gallery', fn ($query) => $query->where('status', '!=', PublicationStatus::Published))
+                ->count(),
+            'Public media must never belong to a non-published gallery.',
+        );
+
+        // Non-published galleries keep their media private (never public).
+        foreach (Gallery::query()->where('status', '!=', PublicationStatus::Published)->get() as $gallery) {
+            $this->assertSame(
+                0,
+                $gallery->media()->where('is_public', true)->count(),
+                "Non-published gallery {$gallery->slug} must not expose public media.",
+            );
+        }
+    }
+
+    /**
+     * Public privacy: no anonymous response leaks member identities, member
+     * numbers, audit metadata, private storage paths, or non-published content
+     * titles.
+     */
+    public function test_demo_seed_anonymous_responses_never_leak_private_data(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $responses = [
+            'home' => $this->get(route('public.home'))->assertOk(),
+            'organization' => $this->get(route('public.organization.index'))->assertOk(),
+            'events' => $this->get(route('public.events.index'))->assertOk(),
+            'events-past' => $this->get(route('public.events.index', ['period' => 'past']))->assertOk(),
+            'galleries' => $this->get(route('public.galleries.index'))->assertOk(),
+            'locations' => $this->get(route('public.training-locations.index'))->assertOk(),
+        ];
+
+        // 1. Private storage path shapes appear in no anonymous response.
+        foreach ($responses as $label => $response) {
+            $response->assertDontSee('private/gallery-media', false);
+            $response->assertDontSee('private/event-covers', false);
+        }
+
+        // 2. No member identity (name), member number, or email is echoed. Sample
+        //    a spread of seeded people so a single regression cannot hide.
+        $members = Membership::query()->with('person')->orderBy('id')->limit(25)->get();
+        $emails = User::query()->pluck('email')->all();
+
+        foreach ([...$responses] as $label => $response) {
+            foreach ($members as $membership) {
+                $name = (string) $membership->person?->name;
+
+                if ($name !== '') {
+                    $response->assertDontSee($name);
+                }
+
+                if ($membership->member_number !== null) {
+                    $response->assertDontSee((string) $membership->member_number);
+                }
+            }
+
+            foreach ($emails as $email) {
+                $response->assertDontSee($email);
+            }
+        }
+
+        // 3. Audit actions/metadata are never rendered anonymously.
+        foreach (array_unique(AuditEvent::query()->pluck('action')->all()) as $action) {
+            foreach ($responses as $response) {
+                $response->assertDontSee($action, false);
+            }
+        }
+
+        // 4. Non-published content never appears. Titles can legitimately repeat
+        //    across units, so only assert absence when a title is unique to a
+        //    non-published row (otherwise a published row could share it).
+        $hiddenModels = [
+            Page::class => 'public.pages.show',
+            Event::class => 'public.events.show',
+            Gallery::class => 'public.galleries.index',
+            TrainingLocation::class => 'public.training-locations.index',
+        ];
+
+        foreach ([Page::class, Event::class, Gallery::class, TrainingLocation::class] as $modelClass) {
+            foreach ($modelClass::query()->where('status', '!=', PublicationStatus::Published)->get() as $hidden) {
+                $title = (string) $hidden->title;
+
+                if ($title === '' || $modelClass::query()->where('title', $title)->count() !== 1) {
+                    continue;
+                }
+
+                foreach ($responses as $response) {
+                    $response->assertDontSee($title);
+                }
+            }
+        }
+
+        // 5. The detail routes for non-published slugs 404 anonymously.
+        $hiddenPage = Page::query()->where('status', '!=', PublicationStatus::Published)->firstOrFail();
+        $hiddenEvent = Event::query()->where('status', '!=', PublicationStatus::Published)->firstOrFail();
+        $hiddenLocation = TrainingLocation::query()->where('status', '!=', PublicationStatus::Published)->firstOrFail();
+
+        $this->get(route('public.pages.show', $hiddenPage->slug))->assertNotFound();
+        $this->get(route('public.events.show', $hiddenEvent->slug))->assertNotFound();
+        $this->get(route('public.training-locations.show', $hiddenLocation->slug))->assertNotFound();
+    }
+
+    /**
+     * Row counts per table, keyed by table name, for rerun comparison.
+     *
+     * @return array<string, int>
+     */
+    private function tableCounts(): array
+    {
+        return [
+            'users' => User::query()->count(),
+            'organization_units' => OrganizationUnit::query()->count(),
+            'organization_positions' => OrganizationPosition::query()->count(),
+            'unit_assignments' => UnitAssignment::query()->count(),
+            'people' => Person::query()->count(),
+            'memberships' => Membership::query()->count(),
+            'membership_status_histories' => MembershipStatusHistory::query()->count(),
+            'approval_requests' => ApprovalRequest::query()->count(),
+            'audit_events' => AuditEvent::query()->count(),
+            'pages' => Page::query()->count(),
+            'events' => Event::query()->count(),
+            'training_locations' => TrainingLocation::query()->count(),
+            'galleries' => Gallery::query()->count(),
+            'media' => Media::query()->count(),
+        ];
+    }
+
+    /**
+     * The distinct natural-key sets each rerunnable seeder upserts on, keyed by
+     * a stable label. Sorted so the comparison is order-independent.
+     *
+     * @return array<string, list<string|int>>
+     */
+    private function naturalKeySets(): array
+    {
+        $sorted = static fn ($values): array => collect($values)->sort()->values()->all();
+
+        return [
+            'user_emails' => $sorted(User::query()->pluck('email')),
+            'user_firebase_uids' => $sorted(User::query()->pluck('firebase_uid')),
+            'unit_keys' => $sorted(OrganizationUnit::query()->get()
+                ->map(fn (OrganizationUnit $unit): string => $unit->type->value.'|'.$unit->name.'|'.($unit->parent_id ?? 'root'))),
+            'assignment_keys' => $sorted(UnitAssignment::query()->get()
+                ->map(fn (UnitAssignment $assignment): string => $assignment->user_id.'|'.$assignment->organization_unit_id.'|'.$assignment->role)),
+            'member_numbers' => $sorted(Membership::query()->whereNotNull('member_number')->pluck('member_number')),
+            'page_slugs' => $sorted(Page::query()->pluck('slug')),
+            'event_slugs' => $sorted(Event::query()->pluck('slug')),
+            'location_slugs' => $sorted(TrainingLocation::query()->pluck('slug')),
+            'gallery_slugs' => $sorted(Gallery::query()->pluck('slug')),
+            'media_paths' => $sorted(Media::query()->pluck('path')),
+            'audit_keys' => $sorted(AuditEvent::query()->get()
+                ->map(fn (AuditEvent $audit): string => $audit->action.'|'.$audit->subject_type.'|'.$audit->subject_id)),
+        ];
+    }
+
     /**
      * Replace the `public` disk with a wrapper whose writes always return false,
      * mirroring a real disk configured with `throw => false` refusing a write.
