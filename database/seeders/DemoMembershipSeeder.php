@@ -56,10 +56,13 @@ class DemoMembershipSeeder extends Seeder
     private const CONVERSION_STATUSES = 3;
 
     /**
-     * Memberships that perform an inactive -> active round trip inside the
-     * variant block, on top of the stopped/inactive/archived variants.
+     * Lower bound for the memberships that perform an inactive -> active round
+     * trip inside the variant block, on top of the stopped/inactive/archived
+     * variants. The five-pattern cycle over {@see self::STATUS_VARIANT_TOTAL}
+     * yields more than this minimum, so it is a floor rather than an exact
+     * count.
      */
-    public const REACTIVATION_TOTAL = 30;
+    public const REACTIVATION_MIN = 30;
 
     /**
      * Base creation ratio: `index % 5 < 2` => warga, giving 40% warga and

@@ -77,6 +77,12 @@ class DemoWorkflowSeeder extends Seeder
      * assert publication alongside the membership actions. The row is attached
      * to the province unit as its subject; the publication seeders extend the
      * public content in a later task.
+     *
+     * This placeholder deliberately reuses the `organization_profile`
+     * content_type of the real profile Page audit, so the integration test
+     * enumerates the expected published-audit set by content_type and carves
+     * this synthetic row out (see DemoDatabaseSeederTest). Change the
+     * content_type here and that carve-out must change with it.
      */
     private function seedPublicationAudits(DemoSeedContext $context): void
     {

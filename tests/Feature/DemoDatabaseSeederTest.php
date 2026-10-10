@@ -434,7 +434,7 @@ class DemoDatabaseSeederTest extends TestCase
             ->count();
 
         $this->assertGreaterThanOrEqual(
-            DemoMembershipSeeder::REACTIVATION_TOTAL,
+            DemoMembershipSeeder::REACTIVATION_MIN,
             $reactivations,
             'A deterministic group must record inactive -> active transitions.',
         );

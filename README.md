@@ -58,7 +58,9 @@ php artisan storage:link     # expose storage/app/public so public gallery media
 
 > **Reset warning — explicit and destructive.** Resetting is a deliberate, destructive
 > step you run yourself; the seeders never do it for you. `DemoDatabaseSeeder` (and
-> `DatabaseSeeder`) never run `migrate:fresh` and never delete rows. To re-seed from
+> `DatabaseSeeder`) never run `migrate:fresh` and never delete rows they do not own
+> (ownership is tracked per artifact via the `demo_artifacts` manifest, so reruns only
+> reconcile their own stale media). To re-seed from
 > scratch, reset the demo database explicitly — either replace the local SQLite file or run
 > `php artisan migrate:fresh` **only** on a disposable local database — then `php artisan
 > db:seed` again. Reruns on an already-seeded database update records by natural key
@@ -69,7 +71,7 @@ Demo operators (one per organization unit; 1 province + 13 branches + 65 ranting
 
 - **Email pattern:** `demo.provinsi@psht-kalsel.test`, `demo.cabang.01@psht-kalsel.test`
   (through `.13`), `demo.ranting.branch-01-01@psht-kalsel.test`, `demo.rayon.…`,
-  `demo.special-ukm-branch-01@psht-kalsel.test`, and so on.
+  `demo.special.ukm-branch-01@psht-kalsel.test`, and so on.
 - **Shared password:** `PshtKalsel@1922` (local demo only — never use in production).
 - Every account is active, onboarded, carries a unique dummy `firebase_uid`, and has an
   active assignment on its unit.

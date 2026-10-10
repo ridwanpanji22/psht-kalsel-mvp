@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Actions\PublishMediaToPortal;
 use App\Enums\PublicationStatus;
+use App\Http\Controllers\Public\EventCoverController;
 use App\Models\DemoArtifact;
 use App\Models\Event;
 use App\Models\Gallery;
@@ -387,6 +388,11 @@ class DemoMediaSeeder extends Seeder
     /**
      * Remove the manifest rows for event covers this seeder owns but that no
      * longer back a seeded event, queueing their files.
+     *
+     * Retiring the file leaves `Event.cover_path` on the dropped-out event
+     * pointing at a now-missing file; public access degrades gracefully
+     * ({@see EventCoverController} aborts 404 when the file is absent), so this
+     * asymmetry is intentional and safe.
      *
      * @param  list<string>  $seededEventSlugs
      * @param  list<array{disk: string, path: string}>  $cleanup
