@@ -1751,6 +1751,102 @@ class DemoDatabaseSeederTest extends TestCase
         Storage::disk('public')->assertExists('public/gallery-media/manual-keep.png');
     }
 
+    public function test_demo_seed_promotion_never_deletes_unmanifested_private_lead(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        // A published gallery whose lead (slot 1) is promoted to the public
+        // disk. The private lead path is never written by this run, so a
+        // foreign/hand-managed file sitting at that exact path has no manifest
+        // entry and must never be deleted by the promotion cleanup.
+        $unit = OrganizationUnit::factory()->create([
+            'name' => 'Cabang Pemimpin Asing',
+            'type' => OrganizationUnitType::Cabang,
+        ]);
+        $gallery = Gallery::factory()->create([
+            'slug' => 'galeri-01-latihan-cabang-pemimpin-asing',
+            'status' => PublicationStatus::Published,
+            'published_at' => now(),
+            'organization_unit_id' => $unit->id,
+        ]);
+
+        $foreignPrivateLead = 'private/gallery-media/demo/1/media-1.png';
+
+        Storage::disk('local')->put($foreignPrivateLead, 'FOREIGN-PRIVATE-LEAD-BYTES');
+
+        $context = new DemoSeedContext;
+        $context->putPublicationKeys(Gallery::class, [$gallery->slug]);
+        $context->putPublicationKeys(Event::class, []);
+
+        app(DemoMediaSeeder::class)->run($context);
+
+        // The lead row is public and its file lives on the public disk...
+        $this->assertSame(
+            1,
+            Media::query()->where('gallery_id', $gallery->id)->where('sort_order', 1)->where('disk', 'public')->count(),
+        );
+        Storage::disk('public')->assertExists('public/gallery-media/demo/1/media-1.png');
+
+        // ...but the unmanifested private lead is untouched: it was never owned
+        // by this seeder (the seeder never wrote it), so cleanup must not delete
+        // it merely because its path matches the deterministic shape.
+        $this->assertFalse(
+            DemoArtifact::query()->where('disk', 'local')->where('path', $foreignPrivateLead)->exists(),
+            'The seeder must not register a manifest row for a file it never wrote.',
+        );
+        Storage::disk('local')->assertExists($foreignPrivateLead);
+        $this->assertSame(
+            'FOREIGN-PRIVATE-LEAD-BYTES',
+            Storage::disk('local')->get($foreignPrivateLead),
+        );
+    }
+
+    public function test_demo_seed_surfaces_a_failure_when_post_commit_cleanup_delete_is_refused(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        // Seed a full dataset so real demo-owned artifacts (including public
+        // leads) exist and are registered in the manifest.
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $staleGallery = Gallery::query()->where('status', PublicationStatus::Published)->firstOrFail();
+        $staleKey = $this->galleryKeyFor($staleGallery->slug);
+        $stalePublicLead = 'public/gallery-media/demo/'.$staleKey.'/media-1.png';
+
+        Storage::disk('public')->assertExists($stalePublicLead);
+
+        // With `throw => false`, a refused delete returns `false`. The cleanup
+        // must never silently claim success while leaving the manifest-owned
+        // file behind (storage would diverge from the committed DB state).
+        $this->failPublicDeletesOf($stalePublicLead);
+
+        // Drive a run whose seeded gallery set is empty, so every manifest-owned
+        // gallery artifact (including the public leads) is superseded and queued
+        // for post-commit deletion.
+        $context = new DemoSeedContext;
+        $context->putPublicationKeys(Gallery::class, []);
+        $context->putPublicationKeys(Event::class, []);
+
+        try {
+            app(DemoMediaSeeder::class)->run($context);
+            $this->fail('A refused destructive delete must surface loudly, not be ignored.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString(
+                'menghapus',
+                $exception->getMessage(),
+                'A refused post-commit delete must raise a precise failure.',
+            );
+        } finally {
+            $this->restorePublicDisk();
+        }
+
+        // The failed deletion is still observable: the file was not removed and
+        // the failure was surfaced rather than swallowed.
+        Storage::disk('public')->assertExists($stalePublicLead);
+    }
+
     public function test_demo_seed_reconciles_media_when_gallery_drops_out_of_the_key_set(): void
     {
         Storage::fake('local');
@@ -1881,6 +1977,40 @@ class DemoDatabaseSeederTest extends TestCase
         $this->installFailingPublicDisk(
             static fn (string $path): bool => ! str_contains(basename($path), '.tmp-'),
         );
+    }
+
+    /**
+     * Make the `public` disk refuse to delete a specific path (returning
+     * `false`, as a disk configured with `throw => false` does), while every
+     * other operation still works. Used to exercise the post-commit cleanup's
+     * handling of a refused destructive delete.
+     */
+    private function failPublicDeletesOf(string $path): void
+    {
+        /** @var FilesystemAdapter $original */
+        $original = Storage::disk('public');
+        $this->originalPublicDisk = $original;
+
+        $wrapper = new class($original, $path) extends FilesystemAdapter
+        {
+            public function __construct(FilesystemAdapter $inner, private string $refusedPath)
+            {
+                parent::__construct($inner->getDriver(), $inner->getAdapter(), $inner->getConfig());
+            }
+
+            public function delete($paths)
+            {
+                $paths = is_array($paths) ? $paths : [$paths];
+
+                if (in_array($this->refusedPath, $paths, true)) {
+                    return false;
+                }
+
+                return parent::delete($paths);
+            }
+        };
+
+        Storage::set('public', $wrapper);
     }
 
     /**

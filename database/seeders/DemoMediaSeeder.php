@@ -202,9 +202,11 @@ class DemoMediaSeeder extends Seeder
                     $disk = self::PUBLIC_DISK;
                     $path = $publicPath;
 
-                    // The private staging is now redundant: release it during
-                    // post-commit cleanup rather than deleting inline.
-                    $cleanup[] = ['disk' => self::LOCAL_DISK, 'path' => $privatePath];
+                    // The private staging is now redundant. It is released via
+                    // the manifest-driven supersession pass below, never by a
+                    // blind path delete: a file this seeder never wrote (and so
+                    // never registered in the manifest) must not be removed just
+                    // because it sits at the deterministic private lead path.
                     $this->discardStaged(self::LOCAL_DISK, $privatePath);
                 } else {
                     $disk = self::LOCAL_DISK;
@@ -509,10 +511,19 @@ class DemoMediaSeeder extends Seeder
      * Delete superseded/orphaned files after the transaction has committed, and
      * remove any lingering staged temp files.
      *
+     * The DB + manifest are already durable, so a cleanup failure cannot be
+     * rolled back; but because the disks use `throw => false`, a refused delete
+     * returns `false` (or silently leaves the file). Such a refusal must never
+     * be swallowed: it is verified and, if it cannot be confirmed, surfaced as a
+     * distinct hard failure so committed DB state never diverges from storage
+     * without a signal.
+     *
      * @param  list<array{disk: string, path: string}>  $cleanup
      */
     private function runCleanup(array $cleanup): void
     {
+        $failures = [];
+
         foreach (array_unique($cleanup, SORT_REGULAR) as $entry) {
             $disk = Storage::disk($entry['disk']);
 
@@ -520,7 +531,17 @@ class DemoMediaSeeder extends Seeder
                 continue;
             }
 
-            $disk->delete($entry['path']);
+            $deleted = $disk->delete($entry['path']);
+
+            if ($deleted === false || $disk->exists($entry['path'])) {
+                $failures[] = $entry['disk'].':'.$entry['path'];
+            }
+        }
+
+        if ($failures !== []) {
+            throw new RuntimeException(
+                'Gagal menghapus berkas media demo yang sudah tidak terpakai: '.implode(', ', array_unique($failures)),
+            );
         }
     }
 
