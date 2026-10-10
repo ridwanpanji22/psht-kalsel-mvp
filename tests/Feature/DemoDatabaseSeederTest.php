@@ -31,6 +31,7 @@ use App\Policies\MembershipStatusHistoryPolicy;
 use App\Policies\PagePolicy;
 use App\Policies\TrainingLocationPolicy;
 use App\Support\SafeStoragePath;
+use Database\Seeders\DatabaseSeeder;
 use Database\Seeders\DemoDatabaseSeeder;
 use Database\Seeders\DemoMediaSeeder;
 use Database\Seeders\DemoMembershipSeeder;
@@ -38,6 +39,7 @@ use Database\Seeders\DemoPublicationSeeder;
 use Database\Seeders\Support\DemoSeedContext;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -1940,26 +1942,44 @@ class DemoDatabaseSeederTest extends TestCase
     // ---------------------------------------------------------------------
 
     /**
-     * Rerun safety, end to end: run the full demo seeder twice against the same
-     * database and compare row counts per table *and* the natural-key sets.
+     * Rerun safety, end to end, through the *documented* entrypoint.
      *
-     * A rerun must be idempotent by natural key — no duplicate email, slug,
-     * member number, unit natural key, gallery media path, assignment, or audit
-     * record. Counts alone could hide a swap, so the distinct natural-key sets
-     * are compared too.
+     * Runs the exact documented command — `db:seed --class=DatabaseSeeder` — twice
+     * against the same database, asserts each invocation exits successfully, and
+     * compares full snapshots (row counts per table + natural-key sets) taken
+     * after each run. A rerun must be idempotent by natural key: no duplicate
+     * email, slug, member number, unit natural key, gallery media path,
+     * assignment, demo artifact, or audit record. Counts alone could hide a swap,
+     * so the distinct natural-key sets are compared too.
      */
     public function test_demo_seed_rerun_preserves_counts_and_natural_key_sets(): void
     {
         Storage::fake('local');
         Storage::fake('public');
 
-        $this->seed(DemoDatabaseSeeder::class);
+        // First invocation of the documented entrypoint.
+        $firstExit = Artisan::call('db:seed', [
+            '--class' => DatabaseSeeder::class,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $firstExit, 'The first `db:seed` invocation must exit successfully.');
+
         $firstCounts = $this->tableCounts();
         $firstKeys = $this->naturalKeySets();
 
-        $this->seed(DemoDatabaseSeeder::class);
+        // Snapshot is non-trivial: the demo dataset actually exists.
+        $this->assertGreaterThan(0, $firstCounts['organization_units']);
+        $this->assertGreaterThan(0, $firstCounts['media']);
+        $this->assertGreaterThan(0, $firstCounts['demo_artifacts']);
 
-        // 1. No table grew or shrank.
+        // Second invocation of the same documented entrypoint.
+        $secondExit = Artisan::call('db:seed', [
+            '--class' => DatabaseSeeder::class,
+            '--force' => true,
+        ]);
+        $this->assertSame(0, $secondExit, 'The second `db:seed` invocation must exit successfully.');
+
+        // 1. No table grew or shrank across the rerun.
         $this->assertSame($firstCounts, $this->tableCounts(), 'A rerun must not change any table row count.');
 
         // 2. The natural-key sets are identical, not merely equal in size.
@@ -2010,6 +2030,15 @@ class DemoDatabaseSeederTest extends TestCase
             $mediaKeys->unique()->count(),
             'Seeded gallery media must be unique per gallery/sort order.',
         );
+
+        // 5. The demo-artifact manifest keeps one row per (namespace, disk, path).
+        $artifactKeys = DemoArtifact::query()->get()
+            ->map(fn (DemoArtifact $artifact): string => $artifact->namespace.'|'.$artifact->disk.'|'.$artifact->path);
+        $this->assertSame(
+            $artifactKeys->count(),
+            $artifactKeys->unique()->count(),
+            'Demo artifacts must be unique per namespace/disk/path.',
+        );
     }
 
     /**
@@ -2040,49 +2069,90 @@ class DemoDatabaseSeederTest extends TestCase
 
     /**
      * Cross-domain actors: every submitter, publisher, membership auditor, and
-     * approval requester/reviewer is a seeded operator holding an active
-     * assignment, so every workflow row points at a real, in-scope operator.
+     * approval requester/reviewer is a seeded operator with a valid assignment.
+     *
+     * Each referenced actor id must resolve to a seeded user that is active
+     * (`users.is_active = true`) and holds an active assignment whose `role` is
+     * `operator` on a seeded organization unit. The referenced ids must be a
+     * subset of the seeded operator ids — no workflow row may point at a
+     * non-operator or an unseeded user.
      */
     public function test_demo_seed_workflow_actors_hold_valid_assignments(): void
     {
         $this->seed(DemoDatabaseSeeder::class);
 
-        $assertActiveOperator = function (?int $userId, string $label): void {
+        $seededOperatorIds = User::query()->pluck('id')->all();
+        $seededUnitIds = OrganizationUnit::query()->pluck('id')->all();
+
+        $actorIds = [];
+
+        $assertSeededOperator = function (?int $userId, string $label) use ($seededOperatorIds, $seededUnitIds): void {
             if ($userId === null) {
                 return;
             }
 
-            $this->assertNotNull(
-                User::query()->find($userId),
-                "{$label} user #{$userId} must exist.",
+            $this->assertContains(
+                $userId,
+                $seededOperatorIds,
+                "{$label} user #{$userId} must be a seeded operator.",
             );
-            $this->assertTrue(
-                UnitAssignment::query()
-                    ->where('user_id', $userId)
-                    ->where('is_active', true)
-                    ->exists(),
-                "{$label} user #{$userId} must hold an active assignment.",
+
+            $user = User::query()->find($userId);
+            $this->assertNotNull($user, "{$label} user #{$userId} must exist.");
+            $this->assertTrue($user->is_active, "{$label} user #{$userId} must be active (`is_active`).");
+
+            $operatorAssignments = UnitAssignment::query()
+                ->where('user_id', $userId)
+                ->where('is_active', true)
+                ->where('role', 'operator')
+                ->get();
+
+            $this->assertGreaterThanOrEqual(
+                1,
+                $operatorAssignments->count(),
+                "{$label} user #{$userId} must hold an active `operator` assignment.",
             );
+
+            foreach ($operatorAssignments as $assignment) {
+                $this->assertContains(
+                    $assignment->organization_unit_id,
+                    $seededUnitIds,
+                    "{$label} user #{$userId} must be assigned to a seeded unit.",
+                );
+            }
         };
 
         // Publication submitters/publishers across every content type.
         foreach ([Page::class, Event::class, TrainingLocation::class, Gallery::class] as $modelClass) {
             foreach ($modelClass::query()->get() as $row) {
-                $assertActiveOperator($row->submitted_by_id, "{$modelClass}#{$row->id} submitter");
-                $assertActiveOperator($row->published_by_id, "{$modelClass}#{$row->id} publisher");
+                $assertSeededOperator($row->submitted_by_id, "{$modelClass}#{$row->id} submitter");
+                $assertSeededOperator($row->published_by_id, "{$modelClass}#{$row->id} publisher");
+                $actorIds[] = $row->submitted_by_id;
+                $actorIds[] = $row->published_by_id;
             }
         }
 
         // Membership-status auditors.
         foreach (MembershipStatusHistory::query()->get() as $history) {
-            $assertActiveOperator($history->actor_id, "MembershipStatusHistory#{$history->id} actor");
+            $assertSeededOperator($history->actor_id, "MembershipStatusHistory#{$history->id} actor");
+            $actorIds[] = $history->actor_id;
         }
 
         // Approval requester/reviewer.
         foreach (ApprovalRequest::query()->get() as $request) {
-            $assertActiveOperator($request->requested_by_id, "ApprovalRequest#{$request->id} requester");
-            $assertActiveOperator($request->reviewed_by_id, "ApprovalRequest#{$request->id} reviewer");
+            $assertSeededOperator($request->requested_by_id, "ApprovalRequest#{$request->id} requester");
+            $assertSeededOperator($request->reviewed_by_id, "ApprovalRequest#{$request->id} reviewer");
+            $actorIds[] = $request->requested_by_id;
+            $actorIds[] = $request->reviewed_by_id;
         }
+
+        // Every referenced actor id is, without exception, a seeded operator id.
+        $this->assertNotEmpty(array_filter($actorIds, fn ($id) => $id !== null), 'The dataset must reference workflow actors.');
+        $this->assertSame(
+            [],
+            array_values(array_diff(array_unique(array_filter($actorIds)), $seededOperatorIds)),
+            'Every workflow actor id must belong to the seeded operator set.',
+        );
     }
 
     /**
@@ -2138,8 +2208,13 @@ class DemoDatabaseSeederTest extends TestCase
 
     /**
      * Public privacy: no anonymous response leaks member identities, member
-     * numbers, audit metadata, private storage paths, or non-published content
-     * titles.
+     * numbers, operator emails, audit rows/metadata, private storage paths, or
+     * non-published content titles.
+     *
+     * Every seeded membership/person name and every non-null member number is
+     * covered — the assertion iterates the complete sets, not a sample. To keep
+     * the runtime bounded it fetches each response body once and scans it with
+     * `str_contains`, aggregating any offending value into a single failure.
      */
     public function test_demo_seed_anonymous_responses_never_leak_private_data(): void
     {
@@ -2157,67 +2232,109 @@ class DemoDatabaseSeederTest extends TestCase
             'locations' => $this->get(route('public.training-locations.index'))->assertOk(),
         ];
 
-        // 1. Private storage path shapes appear in no anonymous response.
+        // Bodies are fetched once; every check scans the cached string.
+        $bodies = [];
         foreach ($responses as $label => $response) {
-            $response->assertDontSee('private/gallery-media', false);
-            $response->assertDontSee('private/event-covers', false);
+            $bodies[$label] = (string) $response->getContent();
         }
 
-        // 2. No member identity (name), member number, or email is echoed. Sample
-        //    a spread of seeded people so a single regression cannot hide.
-        $members = Membership::query()->with('person')->orderBy('id')->limit(25)->get();
-        $emails = User::query()->pluck('email')->all();
+        /**
+         * Assert none of $forbidden appears in any response body, reporting the
+         * offending label/value pairs when one does.
+         *
+         * @param  list<string>  $forbidden
+         */
+        $assertNoneAppear = function (array $forbidden, string $what) use ($bodies): void {
+            $forbidden = array_values(array_unique(array_filter($forbidden, fn (string $v): bool => $v !== '')));
 
-        foreach ([...$responses] as $label => $response) {
-            foreach ($members as $membership) {
-                $name = (string) $membership->person?->name;
-
-                if ($name !== '') {
-                    $response->assertDontSee($name);
+            $hits = [];
+            foreach ($bodies as $label => $body) {
+                foreach ($forbidden as $value) {
+                    if (str_contains($body, $value)) {
+                        $hits[] = "{$label} ⇒ {$value}";
+                    }
                 }
-
-                if ($membership->member_number !== null) {
-                    $response->assertDontSee((string) $membership->member_number);
-                }
             }
 
-            foreach ($emails as $email) {
-                $response->assertDontSee($email);
-            }
+            $this->assertSame([], $hits, "No anonymous response may contain {$what}.");
+        };
+
+        // 1. Private storage path shapes appear in no anonymous response.
+        foreach ($bodies as $label => $body) {
+            $this->assertStringNotContainsString('private/gallery-media', $body, "{$label} leaked a private gallery path.");
+            $this->assertStringNotContainsString('private/event-covers', $body, "{$label} leaked a private event-cover path.");
         }
 
-        // 3. Audit actions/metadata are never rendered anonymously.
-        foreach (array_unique(AuditEvent::query()->pluck('action')->all()) as $action) {
-            foreach ($responses as $response) {
-                $response->assertDontSee($action, false);
+        // 2. Every seeded member identity (name) and every non-null member number
+        //    is scanned across every response. Full sets, not a sample.
+        $allNames = Person::query()->pluck('name')->all();
+        $allMemberNumbers = Membership::query()->whereNotNull('member_number')->pluck('member_number')
+            ->map(fn ($number): string => (string) $number)->all();
+
+        $this->assertNotEmpty($allNames, 'The dataset must contain seeded people for the leak check.');
+        $this->assertNotEmpty($allMemberNumbers, 'The dataset must contain member numbers for the leak check.');
+
+        $assertNoneAppear($allNames, 'a seeded member name');
+        $assertNoneAppear($allMemberNumbers, 'a seeded member number');
+
+        // 3. Operator emails never appear anonymously.
+        $assertNoneAppear(User::query()->pluck('email')->all(), 'a seeded operator email');
+
+        // 4. Audit rows never appear: action names, subject types, the full
+        //    serialized metadata payload, the internal seed keys, and the
+        //    serialized actor/subject id fragments. Bare integer ids are NOT
+        //    asserted (small ints appear in ordinary markup); we assert their
+        //    serialized JSON fragments and the distinctive string fields.
+        $assertNoneAppear(AuditEvent::query()->distinct()->pluck('action')->all(), 'an audit action name');
+        $assertNoneAppear(AuditEvent::query()->distinct()->pluck('subject_type')->all(), 'an audit subject type');
+
+        $serializedMetadata = [];
+        $seedKeys = [];
+        $idFragments = [];
+        foreach (AuditEvent::query()->get() as $audit) {
+            if (! empty($audit->metadata)) {
+                $serializedMetadata[] = (string) json_encode($audit->metadata);
+            }
+
+            if (isset($audit->metadata['seed_key'])) {
+                $seedKeys[] = (string) $audit->metadata['seed_key'];
+            }
+
+            if ($audit->actor_id !== null) {
+                $idFragments[] = '"actor_id":'.$audit->actor_id;
+            }
+
+            if ($audit->subject_id !== null) {
+                $idFragments[] = '"subject_id":'.$audit->subject_id;
+            }
+
+            $referenceId = $audit->metadata['reference_membership_id'] ?? null;
+            if ($referenceId !== null) {
+                $idFragments[] = '"reference_membership_id":'.$referenceId;
             }
         }
+        $this->assertNotEmpty($serializedMetadata, 'The dataset must contain serialized audit metadata.');
+        $assertNoneAppear($serializedMetadata, 'a serialized audit metadata payload');
+        $assertNoneAppear($seedKeys, 'an internal audit seed key');
+        $assertNoneAppear($idFragments, 'a serialized audit actor/subject id fragment');
 
-        // 4. Non-published content never appears. Titles can legitimately repeat
+        // 5. Non-published content never appears. Titles can legitimately repeat
         //    across units, so only assert absence when a title is unique to a
         //    non-published row (otherwise a published row could share it).
-        $hiddenModels = [
-            Page::class => 'public.pages.show',
-            Event::class => 'public.events.show',
-            Gallery::class => 'public.galleries.index',
-            TrainingLocation::class => 'public.training-locations.index',
-        ];
-
         foreach ([Page::class, Event::class, Gallery::class, TrainingLocation::class] as $modelClass) {
+            $hiddenTitles = [];
             foreach ($modelClass::query()->where('status', '!=', PublicationStatus::Published)->get() as $hidden) {
                 $title = (string) $hidden->title;
 
-                if ($title === '' || $modelClass::query()->where('title', $title)->count() !== 1) {
-                    continue;
-                }
-
-                foreach ($responses as $response) {
-                    $response->assertDontSee($title);
+                if ($title !== '' && $modelClass::query()->where('title', $title)->count() === 1) {
+                    $hiddenTitles[] = $title;
                 }
             }
+
+            $assertNoneAppear($hiddenTitles, "a non-published {$modelClass} title");
         }
 
-        // 5. The detail routes for non-published slugs 404 anonymously.
+        // 6. The detail routes for non-published slugs 404 anonymously.
         $hiddenPage = Page::query()->where('status', '!=', PublicationStatus::Published)->firstOrFail();
         $hiddenEvent = Event::query()->where('status', '!=', PublicationStatus::Published)->firstOrFail();
         $hiddenLocation = TrainingLocation::query()->where('status', '!=', PublicationStatus::Published)->firstOrFail();
@@ -2249,6 +2366,7 @@ class DemoDatabaseSeederTest extends TestCase
             'training_locations' => TrainingLocation::query()->count(),
             'galleries' => Gallery::query()->count(),
             'media' => Media::query()->count(),
+            'demo_artifacts' => DemoArtifact::query()->count(),
         ];
     }
 
@@ -2275,6 +2393,8 @@ class DemoDatabaseSeederTest extends TestCase
             'location_slugs' => $sorted(TrainingLocation::query()->pluck('slug')),
             'gallery_slugs' => $sorted(Gallery::query()->pluck('slug')),
             'media_paths' => $sorted(Media::query()->pluck('path')),
+            'demo_artifact_keys' => $sorted(DemoArtifact::query()->get()
+                ->map(fn (DemoArtifact $artifact): string => $artifact->namespace.'|'.$artifact->disk.'|'.$artifact->path)),
             'audit_keys' => $sorted(AuditEvent::query()->get()
                 ->map(fn (AuditEvent $audit): string => $audit->action.'|'.$audit->subject_type.'|'.$audit->subject_id)),
         ];
