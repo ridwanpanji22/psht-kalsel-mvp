@@ -121,7 +121,7 @@ Until each decision is approved, its dependent path remains development-only and
 
 ## Implementation decisions
 
-- Explicit hierarchy: Provinsi → Cabang → Ranting → Rayon; UKM/Komisariat formal children of Provinsi, optional supervising Cabang relation. Pembinaan does not implicitly grant access.
+- Explicit hierarchy: Provinsi → Cabang → Ranting → Rayon; UKM/Komisariat are direct Cabang children with no children of their own, and the optional supervising Cabang relation remains separate mentoring metadata that grants no formal scope. Pembinaan does not implicitly grant access.
 - Unit scope resolves active assignment roots and formal descendants. Missing assignments deny panel entry. Resource policies use explicit Laravel policies and Filament strict authorization.
 - Warga number is externally issued, input by operator, unique and required for warga. No generator or NIK field.
 - Membership and publication changes preserve history/audit; routine delete actions are not provided.
