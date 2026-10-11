@@ -6,7 +6,12 @@
 // is the source of truth, a failed init leaves a fully readable (if long) page
 // rather than an empty one.
 
-const COLLAPSED_DEPTHS = ['2', '3'];
+// On first paint only the province and its branches stay expanded, so the page
+// opens at roughly two screens instead of the full ~19,000px hierarchy. A node
+// collapsed at depth >= 1 hides its own children, which is what keeps every
+// ranting and rayon below the branch level folded away until the reader asks
+// for them.
+const INITIAL_COLLAPSED_MIN_DEPTH = 1;
 
 export function initOrganizationTree() {
     const tree = document.querySelector('#organization-tree');
@@ -50,26 +55,26 @@ export function initOrganizationTree() {
         setCollapsed(node, node.dataset.collapsed !== 'true');
     };
 
-    const matchesFilters = (node) => {
+    // True when the node itself passes the active query and type filter.
+    const selfMatches = (node) => {
         const name = (node.dataset.unitName || '').toLocaleLowerCase('id');
         const type = node.dataset.unitType || '';
-        const matchesQuery = query === '' || name.includes(query);
-        const matchesType = activeType === 'all' || type === activeType;
 
-        return matchesQuery && matchesType;
+        return (query === '' || name.includes(query))
+            && (activeType === 'all' || type === activeType);
     };
 
     const applyFilters = () => {
+        const narrowing = query !== '' || activeType !== 'all';
         let visibleCount = 0;
 
         nodes.forEach((node) => {
-            const selfMatch = matchesFilters(node);
-            const descendantMatch = query !== ''
-                && [...node.querySelectorAll('[data-tree-node]')].some((child) => {
-                    const childName = (child.dataset.unitName || '').toLocaleLowerCase('id');
-
-                    return childName.includes(query);
-                });
+            const selfMatch = narrowing ? selfMatches(node) : true;
+            // A non-matching ancestor still has to stay visible when a
+            // descendant matches, otherwise the matching unit is orphaned
+            // inside a hidden subtree.
+            const descendantMatch = narrowing
+                && [...node.querySelectorAll('[data-tree-node]')].some((child) => selfMatches(child));
             const show = selfMatch || descendantMatch;
 
             node.hidden = !show;
@@ -77,8 +82,9 @@ export function initOrganizationTree() {
             if (show) {
                 visibleCount += 1;
 
-                // Auto-expand ancestors so a deep search hit is reachable.
-                if (query !== '') {
+                // Auto-expand ancestors so a matching unit below the branch
+                // level is actually reachable.
+                if (narrowing) {
                     let parent = node.parentElement?.closest('[data-tree-node]');
 
                     while (parent) {
@@ -92,10 +98,10 @@ export function initOrganizationTree() {
         if (result) {
             const total = nodes.length;
 
-            if (query === '' && activeType === 'all') {
-                result.textContent = `${total} unit ditampilkan.`;
-            } else {
+            if (narrowing) {
                 result.textContent = `${visibleCount} dari ${total} unit cocok.`;
+            } else {
+                result.textContent = `${total} unit ditampilkan.`;
             }
         }
     };
@@ -146,10 +152,10 @@ export function initOrganizationTree() {
         });
     }
 
-    // Initial state: expand the province and branches, collapse the rest so the
-    // page opens short. Mirrors the approved preview.
+    // Initial state: the province and its branches stay expanded, everything
+    // below them opens collapsed so the page opens at roughly two screens.
     nodes.forEach((node) => {
-        if (COLLAPSED_DEPTHS.includes(node.dataset.depth || '')) {
+        if (Number(node.dataset.depth || '0') >= INITIAL_COLLAPSED_MIN_DEPTH) {
             setCollapsed(node, true);
         }
     });
