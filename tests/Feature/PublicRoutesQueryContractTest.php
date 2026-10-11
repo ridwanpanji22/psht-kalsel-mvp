@@ -562,6 +562,23 @@ class PublicRoutesQueryContractTest extends TestCase
         $this->assertSame(2, substr_count($html, 'data-tree-toggle'));
     }
 
+    public function test_structure_page_renders_the_tree_toolbar_for_search_and_filtering(): void
+    {
+        OrganizationUnit::factory()->create([
+            'name' => 'Pengurus Provinsi Kalimantan Selatan',
+            'type' => OrganizationUnitType::Provinsi,
+        ]);
+
+        $this->get(route('public.organization.index'))
+            ->assertOk()
+            ->assertSee('id="organization-search"', false)
+            ->assertSee('data-tree-filter="all"', false)
+            ->assertSee('data-tree-filter="cabang"', false)
+            ->assertSee('data-tree-expand-all', false)
+            ->assertSee('data-tree-collapse-all', false)
+            ->assertSee('role="status"', false);
+    }
+
     public function test_gallery_index_orders_by_published_at_desc_and_paginates_twelve_while_preserving_category(): void
     {
         Storage::fake('public');
