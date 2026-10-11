@@ -506,6 +506,25 @@ class PublicRoutesQueryContractTest extends TestCase
             });
     }
 
+    public function test_gallery_index_renders_each_album_with_one_lightbox_cover(): void
+    {
+        Storage::fake('public');
+        $gallery = $this->publishedGallery(['title' => 'Album Grid']);
+        $media = $this->publicMedia($gallery, [
+            'path' => 'public/gallery-media/grid.webp',
+            'alt_text' => 'Sampul album grid',
+        ]);
+
+        $html = $this->get(route('public.galleries.index'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertStringContainsString('alt="Sampul album grid"', $html);
+        $this->assertStringContainsString(route('public.media.show', $media), $html);
+        $this->assertStringContainsString('data-gallery-open', $html);
+        $this->assertStringContainsString('Album Grid', $html);
+    }
+
     public function test_gallery_index_orders_by_published_at_desc_and_paginates_twelve_while_preserving_category(): void
     {
         Storage::fake('public');

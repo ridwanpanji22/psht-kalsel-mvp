@@ -45,6 +45,16 @@ class DemoPublicationSeeder extends Seeder
     /** Exactly 26 galleries. */
     public const GALLERY_TOTAL = 26;
 
+    /** Published albums in the demo set: one cover per album on the public grid. */
+    public const GALLERY_PUBLISHED_TOTAL = 20;
+
+    /** Statuses cycled by the remaining albums so every state stays represented. */
+    private const GALLERY_REMAINING_STATUSES = [
+        PublicationStatus::Draft,
+        PublicationStatus::PendingReview,
+        PublicationStatus::Archived,
+    ];
+
     /** Deterministic publication timestamp for the "published" rows. */
     private const PUBLISHED_AT = '2026-09-20 09:00:00';
 
@@ -461,13 +471,12 @@ class DemoPublicationSeeder extends Seeder
             GalleryCategory::Kegiatan,
             GalleryCategory::Pembinaan,
         ];
-        $statuses = PublicationStatus::cases();
 
         for ($index = 0; $index < self::GALLERY_TOTAL; $index++) {
             $owner = $forcedOwners[$index] ?? $owners[($index * 3) % $ownerCount];
             $operator = $operatorByUnitId[$owner->id] ?? $fallback;
             $category = $categories[$index % count($categories)];
-            $status = $statuses[$index % count($statuses)];
+            $status = $this->galleryStatus($index);
             $isPublished = $status === PublicationStatus::Published;
 
             $title = 'Galeri '.$category->label().' '.$owner->name;
@@ -495,11 +504,23 @@ class DemoPublicationSeeder extends Seeder
         $context->putPublicationKeys(Gallery::class, $slugs);
     }
 
+    /**
+     * Publish the first {@see self::GALLERY_PUBLISHED_TOTAL} albums so the public
+     * index renders a full cover grid; the remaining albums cycle the
+     * non-published states so every publication status stays represented.
+     */
+    private function galleryStatus(int $index): PublicationStatus
+    {
+        if ($index < self::GALLERY_PUBLISHED_TOTAL) {
+            return PublicationStatus::Published;
+        }
+
+        return self::GALLERY_REMAINING_STATUSES[$index % count(self::GALLERY_REMAINING_STATUSES)];
+    }
+
     private function eventCoverPath(int $index): string
     {
-        $extension = $index % 2 === 0 ? 'jpg' : 'webp';
-
-        return 'private/event-covers/demo/kegiatan-'.str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT).'.'.$extension;
+        return 'private/event-covers/demo/kegiatan-'.str_pad((string) ($index + 1), 2, '0', STR_PAD_LEFT).'.webp';
     }
 
     private function pageBody(string $title): string

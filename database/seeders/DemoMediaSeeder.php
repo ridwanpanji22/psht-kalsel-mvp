@@ -71,17 +71,7 @@ class DemoMediaSeeder extends Seeder
     /** Deterministic public namespace prefix on the `public` disk. */
     private const PUBLIC_DEMO_PREFIX = 'public/gallery-media/demo/';
 
-    /** Checked-in PNG fixtures, cycled deterministically. */
-    private const PLACEHOLDER_ASSETS = [
-        'images/demo/demo-placeholder-1.png',
-        'images/demo/demo-placeholder-2.png',
-        'images/demo/demo-placeholder-3.png',
-    ];
-
-    /** Checked-in JPEG fixture used for `.jpg` event covers. */
-    private const JPEG_ASSET = 'images/demo/demo-placeholder-1.jpg';
-
-    /** Checked-in WebP reused for selected rows without mutating the source. */
+    /** Checked-in hero fixture used for every seeded gallery and event image. */
     private const HERO_ASSET = 'images/hero-martial-arts-poster.webp';
 
     /** @var list<string> */
@@ -407,7 +397,9 @@ class DemoMediaSeeder extends Seeder
         foreach ($artifacts as $artifact) {
             $event = $this->ownerEvent($artifact);
 
-            if ($event !== null && in_array($event->slug, $seededEventSlugs, true)) {
+            if ($event !== null
+                && in_array($event->slug, $seededEventSlugs, true)
+                && $artifact->path === $event->cover_path) {
                 continue;
             }
 
@@ -640,34 +632,16 @@ class DemoMediaSeeder extends Seeder
         return dirname($finalPath).'/.tmp-'.bin2hex(random_bytes(8));
     }
 
-    /**
-     * Choose a checked-in fixture for a gallery slot. Slots 3 and 4 reuse the
-     * existing WebP hero asset (copied, never mutated); slots 1 and 2 cycle two
-     * distinct checked-in PNG fixtures.
-     */
+    /** Choose the checked-in hero fixture for every gallery slot. */
     private function sourceAssetFor(int $galleryKey, int $slot): string
     {
-        if ($slot >= 3) {
-            return self::HERO_ASSET;
-        }
-
-        return self::PLACEHOLDER_ASSETS[($galleryKey + $slot) % 2];
+        return self::HERO_ASSET;
     }
 
-    /**
-     * Choose a fixture whose real content type matches the covered path's
-     * extension, so a `.jpg` cover never contains PNG bytes.
-     */
+    /** Choose the checked-in hero fixture for every event cover. */
     private function coverAssetFor(string $path): string
     {
-        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-
-        return match ($extension) {
-            'jpg', 'jpeg' => self::JPEG_ASSET,
-            'webp' => self::HERO_ASSET,
-            'png' => self::PLACEHOLDER_ASSETS[0],
-            default => throw new RuntimeException("Ekstensi sampul demo tidak didukung: {$path}"),
-        };
+        return self::HERO_ASSET;
     }
 
     private function expectedMimeTypeFor(string $asset): string

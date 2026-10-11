@@ -144,12 +144,25 @@ class DemoWorkflowSeeder extends Seeder
             return;
         }
 
-        $records = $modelClass::query()
+        $seededRecords = $modelClass::query()
             ->whereIn($keyColumn, $keys)
-            ->where('status', PublicationStatus::Published)
-            ->get();
+            ->get(['id', $keyColumn, 'status', 'published_by_id', 'submitted_by_id', 'published_at']);
+        $publishedRecords = $seededRecords->where('status', PublicationStatus::Published);
+        $seededIds = $seededRecords->pluck('id')->all();
+        $publishedIds = $publishedRecords->pluck('id')->all();
 
-        foreach ($records as $record) {
+        $staleAudits = AuditEvent::query()
+            ->where('subject_type', (new $modelClass)->getMorphClass())
+            ->where('action', 'content.published')
+            ->whereIn('subject_id', $seededIds);
+
+        if ($publishedIds === []) {
+            $staleAudits->delete();
+        } else {
+            $staleAudits->whereNotIn('subject_id', $publishedIds)->delete();
+        }
+
+        foreach ($publishedRecords as $record) {
             AuditEvent::query()->updateOrCreate(
                 [
                     'subject_type' => $record->getMorphClass(),

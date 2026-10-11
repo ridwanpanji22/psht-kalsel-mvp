@@ -1056,11 +1056,11 @@ class DemoDatabaseSeederTest extends TestCase
         $this->assertDatabaseHas('galleries', ['id' => $foreignGallery->id, 'status' => PublicationStatus::Published->value]);
 
         // `content.published` gains exactly the demo rows: 4 pages + 10 events +
-        // 16 locations + 6 galleries + 1 province placeholder = 37. The planted
+        // 16 locations + 20 galleries + 1 province placeholder = 51. The planted
         // foreign rows add nothing.
         $this->assertGreaterThanOrEqual($foreignAuditCountBefore, AuditEvent::query()->count());
         $this->assertSame(
-            $publicationAuditsBefore + 37,
+            $publicationAuditsBefore + 51,
             AuditEvent::query()->where('action', 'content.published')->count(),
             'Seeding must add exactly the demo content.published audits and nothing else.',
         );
@@ -1109,7 +1109,7 @@ class DemoDatabaseSeederTest extends TestCase
             'An unrelated event cover path must never be materialised by the demo seeder.',
         );
         $this->assertFalse(
-            Storage::disk('local')->exists('private/gallery-media/demo/99/media-1.png'),
+            Storage::disk('local')->exists('private/gallery-media/demo/99/media-1.webp'),
             'No storage directory may be created for an unrelated gallery key.',
         );
     }
@@ -1124,10 +1124,10 @@ class DemoDatabaseSeederTest extends TestCase
         // produces (gallery key 99 is not seeded; cover kegiatan-98 is outside
         // the seeded 01..39 range). None has a manifest entry, so none may be
         // touched.
-        $foreignLeadPrivate = 'private/gallery-media/demo/99/media-1.png';
-        $foreignLeadPublic = 'public/gallery-media/demo/99/media-1.png';
+        $foreignLeadPrivate = 'private/gallery-media/demo/99/media-1.webp';
+        $foreignLeadPublic = 'public/gallery-media/demo/99/media-1.webp';
         $foreignSlot = 'private/gallery-media/demo/99/media-3.webp';
-        $foreignCover = 'private/event-covers/demo/kegiatan-98.jpg';
+        $foreignCover = 'private/event-covers/demo/kegiatan-98.webp';
         $foreignUnknownKey = 'private/gallery-media/demo/777/manual-keep.png';
 
         Storage::disk('local')->put($foreignLeadPrivate, 'foreign lead private');
@@ -1228,8 +1228,8 @@ class DemoDatabaseSeederTest extends TestCase
             'organization_unit_id' => $unit->id,
         ]);
 
-        $overwrittenPrivate = 'private/gallery-media/demo/1/media-2.png';
-        $overwrittenPublic = 'public/gallery-media/demo/1/media-1.png';
+        $overwrittenPrivate = 'private/gallery-media/demo/1/media-2.webp';
+        $overwrittenPublic = 'public/gallery-media/demo/1/media-1.webp';
 
         Storage::disk('local')->put($overwrittenPrivate, 'ORIGINAL-PRIVATE-BYTES');
         Storage::disk('public')->put($overwrittenPublic, 'ORIGINAL-PUBLIC-BYTES');
@@ -1282,8 +1282,8 @@ class DemoDatabaseSeederTest extends TestCase
             'organization_unit_id' => $unit->id,
         ]);
 
-        $overwrittenPrivate = 'private/gallery-media/demo/1/media-2.png';
-        $overwrittenPublic = 'public/gallery-media/demo/1/media-1.png';
+        $overwrittenPrivate = 'private/gallery-media/demo/1/media-2.webp';
+        $overwrittenPublic = 'public/gallery-media/demo/1/media-1.webp';
         Storage::disk('local')->put($overwrittenPrivate, 'ORIGINAL-PRIVATE-BYTES');
         Storage::disk('public')->put($overwrittenPublic, 'ORIGINAL-PUBLIC-BYTES');
 
@@ -1498,6 +1498,44 @@ class DemoDatabaseSeederTest extends TestCase
         }
     }
 
+    public function test_demo_seed_publishes_twenty_albums_each_with_one_public_cover(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $published = Gallery::query()
+            ->where('status', PublicationStatus::Published)
+            ->with('media')
+            ->get();
+
+        $this->assertCount(20, $published, 'The demo must publish 20 albums so the public grid is full.');
+        $this->assertSame(
+            26 - 20,
+            Gallery::query()->where('status', '!=', PublicationStatus::Published)->count(),
+            'The non-published albums must still cover the other three statuses.',
+        );
+
+        foreach ($published as $gallery) {
+            $this->assertCount(
+                1,
+                $gallery->media->where('is_public', true)->where('disk', 'public'),
+                "Published album {$gallery->slug} must expose exactly one public cover.",
+            );
+        }
+
+        // The rendered index shows each album's own public cover image.
+        $response = $this->get(route('public.galleries.index'))->assertOk();
+
+        foreach ($published->take(12) as $gallery) {
+            $response->assertSee(
+                route('public.media.show', $gallery->media->first()),
+                false,
+            );
+        }
+    }
+
     public function test_demo_seed_media_rows_carry_valid_image_metadata(): void
     {
         Storage::fake('local');
@@ -1539,6 +1577,29 @@ class DemoDatabaseSeederTest extends TestCase
                 collect($sortOrders)->sort()->values()->all(),
                 "Gallery {$gallery->slug} media sort order must be unique and dense.",
             );
+        }
+    }
+
+    public function test_demo_seed_uses_hero_asset_for_all_gallery_media_and_event_covers(): void
+    {
+        Storage::fake('local');
+        Storage::fake('public');
+
+        $this->seed(DemoDatabaseSeeder::class);
+
+        $hero = file_get_contents(public_path('images/hero-martial-arts-poster.webp'));
+        $this->assertIsString($hero);
+
+        foreach (Media::query()->get() as $media) {
+            $disk = Storage::disk($media->disk);
+            $this->assertSame($hero, $disk->get($media->path), "Gallery media #{$media->id} must use the hero asset.");
+            $this->assertSame('image/webp', $media->mime_type);
+            $this->assertSame('webp', strtolower(pathinfo((string) $media->path, PATHINFO_EXTENSION)));
+        }
+
+        foreach (Event::query()->whereNotNull('cover_path')->get() as $event) {
+            $this->assertSame($hero, Storage::disk('local')->get($event->cover_path));
+            $this->assertSame('webp', strtolower(pathinfo((string) $event->cover_path, PATHINFO_EXTENSION)));
         }
     }
 
@@ -1688,9 +1749,9 @@ class DemoDatabaseSeederTest extends TestCase
         // Foreign/hand-managed stale artifacts with no manifest entry: they use
         // demo-shaped paths but this seeder never registered them, so they must
         // survive even though their key/event is not in the seeded set.
-        $foreignStaleLocal = 'private/gallery-media/demo/999/media-1.png';
-        $foreignStalePublic = 'public/gallery-media/demo/999/media-1.png';
-        $foreignStaleCover = 'private/event-covers/demo/kegiatan-999.jpg';
+        $foreignStaleLocal = 'private/gallery-media/demo/999/media-1.webp';
+        $foreignStalePublic = 'public/gallery-media/demo/999/media-1.webp';
+        $foreignStaleCover = 'private/event-covers/demo/kegiatan-999.webp';
 
         Storage::disk('local')->put($foreignStaleLocal, 'stale');
         Storage::disk('public')->put($foreignStalePublic, 'stale');
@@ -1737,7 +1798,7 @@ class DemoDatabaseSeederTest extends TestCase
             Media::query()->where('gallery_id', $gallery->id)->where('is_public', true)->count(),
             'A gallery that stopped being published must not keep public media.',
         );
-        Storage::disk('public')->assertMissing('public/gallery-media/demo/'.$this->galleryKeyFor($gallery->slug).'/media-1.png');
+        Storage::disk('public')->assertMissing('public/gallery-media/demo/'.$this->galleryKeyFor($gallery->slug).'/media-1.webp');
 
         // The manifest-owned cover of the now-unseeded event is gone.
         Storage::disk('local')->assertMissing((string) $event->cover_path);
@@ -1773,7 +1834,7 @@ class DemoDatabaseSeederTest extends TestCase
             'organization_unit_id' => $unit->id,
         ]);
 
-        $foreignPrivateLead = 'private/gallery-media/demo/1/media-1.png';
+        $foreignPrivateLead = 'private/gallery-media/demo/1/media-1.webp';
 
         Storage::disk('local')->put($foreignPrivateLead, 'FOREIGN-PRIVATE-LEAD-BYTES');
 
@@ -1788,7 +1849,7 @@ class DemoDatabaseSeederTest extends TestCase
             1,
             Media::query()->where('gallery_id', $gallery->id)->where('sort_order', 1)->where('disk', 'public')->count(),
         );
-        Storage::disk('public')->assertExists('public/gallery-media/demo/1/media-1.png');
+        Storage::disk('public')->assertExists('public/gallery-media/demo/1/media-1.webp');
 
         // ...but the unmanifested private lead is untouched: it was never owned
         // by this seeder (the seeder never wrote it), so cleanup must not delete
@@ -1815,7 +1876,7 @@ class DemoDatabaseSeederTest extends TestCase
 
         $staleGallery = Gallery::query()->where('status', PublicationStatus::Published)->firstOrFail();
         $staleKey = $this->galleryKeyFor($staleGallery->slug);
-        $stalePublicLead = 'public/gallery-media/demo/'.$staleKey.'/media-1.png';
+        $stalePublicLead = 'public/gallery-media/demo/'.$staleKey.'/media-1.webp';
 
         Storage::disk('public')->assertExists($stalePublicLead);
 
@@ -1878,8 +1939,8 @@ class DemoDatabaseSeederTest extends TestCase
         app(DemoMediaSeeder::class)->run($firstContext);
 
         $this->assertSame(8, Media::query()->count());
-        Storage::disk('public')->assertExists('public/gallery-media/demo/2/media-1.png');
-        Storage::disk('local')->assertExists('private/gallery-media/demo/2/media-2.png');
+        Storage::disk('public')->assertExists('public/gallery-media/demo/2/media-1.webp');
+        Storage::disk('local')->assertExists('private/gallery-media/demo/2/media-2.webp');
 
         // Second run where the second gallery is no longer seeded.
         $secondContext = new DemoSeedContext;
@@ -1889,8 +1950,8 @@ class DemoDatabaseSeederTest extends TestCase
 
         // The dropped gallery's rows/files are gone; the kept gallery survives.
         $this->assertSame(0, Media::query()->where('gallery_id', $drop->id)->count());
-        Storage::disk('local')->assertMissing('private/gallery-media/demo/2/media-2.png');
-        Storage::disk('public')->assertMissing('public/gallery-media/demo/2/media-1.png');
+        Storage::disk('local')->assertMissing('private/gallery-media/demo/2/media-2.webp');
+        Storage::disk('public')->assertMissing('public/gallery-media/demo/2/media-1.webp');
         $this->assertSame(4, Media::query()->where('gallery_id', $keep->id)->count());
         $this->assertSame(4, Media::query()->count());
     }

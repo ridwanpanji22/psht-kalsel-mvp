@@ -29,43 +29,43 @@
                 @endforeach
             </div>
 
-            <div class="mt-8 space-y-8">
+            <ul class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 @forelse ($galleries as $gallery)
-                    <article class="psht-card p-5">
-                        <div class="flex flex-wrap items-baseline justify-between gap-2">
-                            <h2 class="text-xl font-semibold text-white">{{ $gallery->title }}</h2>
-                            @if ($gallery->category)
-                                <span class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">{{ $gallery->category->label() }}</span>
-                            @endif
-                        </div>
-                        @if ($gallery->description)
-                            <p class="mt-2 text-stone-400">{{ $gallery->description }}</p>
-                        @endif
+                    @php $cover = $gallery->media->first(); @endphp
 
-                        @if ($gallery->media->isEmpty())
-                            <p class="mt-4 rounded-xl border border-dashed border-white/15 p-4 text-sm text-stone-400">Belum ada media publik pada album ini.</p>
-                        @else
-                            <ul class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Media {{ $gallery->title }}">
-                                @foreach ($gallery->media as $media)
-                                    <li>
-                                        <button type="button"
-                                                class="group block w-full overflow-hidden rounded-xl text-left"
-                                                data-gallery-open
-                                                data-media-label="{{ $media->alt_text ?: $gallery->title }}">
-                                            <img class="aspect-video w-full rounded-xl border border-white/10 object-cover transition group-hover:border-psht-bright" src="{{ route('public.media.show', $media) }}" alt="{{ $media->alt_text ?: 'Media album '.$gallery->title }}" loading="lazy">
-                                        </button>
-                                    </li>
-                                @endforeach
-                            </ul>
-                        @endif
-                    </article>
+                    <li>
+                        <article class="psht-card flex h-full flex-col overflow-hidden transition hover:border-psht-bright focus-within:border-psht-bright">
+                            @if ($cover)
+                                <button type="button"
+                                        class="group block w-full cursor-pointer"
+                                        data-gallery-open
+                                        data-media-label="{{ $cover->alt_text ?: $gallery->title }}">
+                                    <img class="aspect-video w-full object-cover transition group-hover:opacity-90" src="{{ route('public.media.show', $cover) }}" alt="{{ $cover->alt_text ?: 'Media album '.$gallery->title }}" loading="lazy">
+                                </button>
+                            @else
+                                <div class="flex aspect-video w-full items-center justify-center border-b border-dashed border-white/15 p-4 text-center text-sm text-stone-400">
+                                    Belum ada media publik pada album ini.
+                                </div>
+                            @endif
+
+                            <div class="flex flex-1 flex-col p-5">
+                                @if ($gallery->category)
+                                    <span class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-300">{{ $gallery->category->label() }}</span>
+                                @endif
+                                <h2 class="mt-2 text-xl font-semibold text-white">{{ $gallery->title }}</h2>
+                                @if ($gallery->description)
+                                    <p class="mt-2 text-sm text-stone-400">{{ $gallery->description }}</p>
+                                @endif
+                            </div>
+                        </article>
+                    </li>
                 @empty
-                    <div class="psht-card border-dashed p-6 text-stone-400">
+                    <li class="psht-card border-dashed p-6 text-stone-400 sm:col-span-2 lg:col-span-3">
                         <p>Belum ada album yang diterbitkan pada kategori ini.</p>
                         <a href="{{ route('public.galleries.index', ['category' => 'all']) }}" class="mt-3 inline-block font-medium text-amber-300 underline-offset-4 hover:underline">Lihat semua album</a>
-                    </div>
+                    </li>
                 @endforelse
-            </div>
+            </ul>
 
             <div class="mt-8">{{ $galleries->links() }}</div>
         </div>
