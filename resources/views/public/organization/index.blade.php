@@ -15,15 +15,29 @@
             @if ($units->isEmpty())
                 <p class="psht-card border-dashed p-6 text-stone-400">Struktur belum diterbitkan.</p>
             @else
-                {{-- Deep hierarchies can need more width than a 320px viewport can
-                     give once indentation compounds; the tree scrolls inside this
-                     wrapper instead of widening the page. The wrapper is
-                     keyboard-focusable so the scroll region stays reachable
-                     without a pointer. --}}
-                <div class="organization-tree-scroll" tabindex="0" aria-label="Struktur organisasi">
-                    <ol class="organization-tree space-y-4">
+                <div class="organization-toolbar mb-6" role="search">
+                    <label for="organization-search" class="sr-only">Cari unit organisasi</label>
+                    <input
+                        id="organization-search"
+                        type="search"
+                        class="organization-search w-full max-w-sm px-3 py-2.5"
+                        placeholder="Cari unit organisasi…"
+                        autocomplete="off"
+                    >
+                    <div class="organization-filters" role="group" aria-label="Filter jenis unit">
+                        <button type="button" class="organization-filter" data-tree-filter="all" aria-pressed="true">Semua</button>
+                        @foreach (\App\OrganizationUnitType::cases() as $type)
+                            <button type="button" class="organization-filter" data-tree-filter="{{ $type->value }}" aria-pressed="false">{{ ucfirst($type->value) }}</button>
+                        @endforeach
+                    </div>
+                    <button type="button" class="organization-filter" data-tree-expand-all>Buka semua</button>
+                    <button type="button" class="organization-filter" data-tree-collapse-all>Tutup semua</button>
+                    <p class="organization-result mt-2 text-sm text-stone-400" role="status" aria-live="polite"></p>
+                </div>
+                <div class="organization-tree-scroll">
+                    <ol id="organization-tree" class="organization-tree space-y-4" aria-label="Struktur organisasi">
                         @foreach ($units as $unit)
-                            <li>@include('public.organization.unit', ['unit' => $unit, 'depth' => 0])</li>
+                            @include('public.organization.unit', ['unit' => $unit, 'depth' => 0])
                         @endforeach
                     </ol>
                 </div>

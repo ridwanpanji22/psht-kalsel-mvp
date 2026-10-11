@@ -94,6 +94,29 @@ summary:focus-visible {
     display: none !important;
 }
 
+.tree-children[hidden] {
+    display: none;
+}
+
+.organization-unit-chevron {
+    display: inline-block;
+    transition: transform 200ms ease;
+    transform: rotate(90deg);
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.tree-node[data-collapsed='true'] .organization-unit-chevron {
+    transform: rotate(0deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .organization-unit-chevron,
+    .tree-children {
+        transition: none;
+    }
+}
+
 .gallery-dialog {
     position: fixed;
     inset: 0;

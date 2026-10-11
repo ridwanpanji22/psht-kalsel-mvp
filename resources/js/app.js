@@ -6,6 +6,7 @@ import markerIconUrl from 'leaflet/dist/images/marker-icon.png';
 import markerShadowUrl from 'leaflet/dist/images/marker-shadow.png';
 import { initGalleryCarousels } from './gallery-carousel';
 import { initGalleryLightbox } from './public-gallery-lightbox';
+import { initOrganizationTree } from './organization-tree';
 
 // Leaflet resolves its default marker images relative to the stylesheet at
 // runtime, which breaks under Vite's hashed asset URLs (the icon 404s and the
@@ -113,4 +114,10 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => initGalleryLightbox());
 } else {
     initGalleryLightbox();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => initOrganizationTree());
+} else {
+    initOrganizationTree();
 }

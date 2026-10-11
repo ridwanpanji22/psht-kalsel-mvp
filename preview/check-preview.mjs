@@ -132,6 +132,15 @@ test('structure preview preserves unit hierarchy and supervision semantics', asy
     assert.match(html, /data-unit-type="komisariat"/);
     assert.match(html, /Data contoh untuk preview/);
     assert.match(html, /aria-live="polite"/);
+    // Parity with the production tree: the preview exposes the same search,
+    // type-filter, bulk-toggle, and collapse hooks the app uses.
+    assert.match(html, /data-tree-filter="all"/);
+    assert.match(html, /data-tree-filter="cabang"/);
+    assert.match(html, /data-tree-expand-all/);
+    assert.match(html, /data-tree-collapse-all/);
+    assert.match(html, /data-tree-toggle/);
+    assert.match(html, /data-tree-node/);
+    assert.match(html, /data-tree-children/);
 });
 
 test('gallery preview provides public albums, filters, and an accessible lightbox', async () => {
