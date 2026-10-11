@@ -140,7 +140,10 @@
 }
 
 /* Deep hierarchies keep their guide line but stop compounding the indent so
-   the innermost card stays wide enough to render its name at 320px. */
+   the innermost card stays wide enough to render its name. Indentation is
+   capped at level three; below that the card holds a readable floor and any
+   residual overflow is absorbed by the tree's own scroll container instead of
+   widening the page. */
 .organization-children .organization-children {
     margin-left: 0.5rem;
     padding-left: 0.5rem;
@@ -167,6 +170,14 @@
 .organization-children .organization-children .organization-children .organization-unit-card .text-lg {
     font-size: 0.9375rem;
 }
+
+/* Level three and deeper hold a readable floor so a long unit name wraps into
+   a few words per line instead of one character-wide column. */
+.organization-children .organization-children .organization-unit-card,
+.organization-children .organization-children .organization-children .organization-unit-card {
+    min-width: 18rem;
+}
+
 
 /* Type accent on the card's left border; mirrors OrganizationUnitType. */
 .organization-unit-card[data-unit-type='provinsi'] {
@@ -274,6 +285,14 @@
 .organization-filter:focus-visible {
     outline: 2px solid #2162ed;
     outline-offset: 2px;
+}
+
+/* Bounds deep-hierarchy overflow inside the tree column: the readable card
+   floor can exceed a narrow viewport, and this container scrolls locally
+   rather than widening the page. */
+.organization-tree-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
 }
 
 @media (prefers-reduced-motion: reduce) {

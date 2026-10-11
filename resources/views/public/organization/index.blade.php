@@ -34,11 +34,13 @@
                     <button type="button" class="organization-filter" data-tree-collapse-all>Tutup semua</button>
                     <p class="organization-result mt-2 text-sm text-stone-400" role="status" aria-live="polite"></p>
                 </div>
-                <ol id="organization-tree" class="organization-tree space-y-4" aria-label="Struktur organisasi">
-                    @foreach ($units as $unit)
-                        @include('public.organization.unit', ['unit' => $unit, 'depth' => 0])
-                    @endforeach
-                </ol>
+                <div class="organization-tree-scroll">
+                    <ol id="organization-tree" class="organization-tree space-y-4" aria-label="Struktur organisasi">
+                        @foreach ($units as $unit)
+                            @include('public.organization.unit', ['unit' => $unit, 'depth' => 0])
+                        @endforeach
+                    </ol>
+                </div>
             @endif
         </div>
     </section>

@@ -527,22 +527,20 @@ class PublicUiRenderTest extends TestCase
 
         $html = $this->get(route('public.organization.index'))->assertOk()->getContent();
 
-        // Depth 1 and depth 2 render 1.25rem and 2.5rem of inline-start margin;
-        // depth 3+ is capped at 2.5rem so cumulative indentation stops growing.
-        $this->assertStringContainsString('margin-inline-start: 1.25rem', $html);
-        $this->assertStringContainsString('margin-inline-start: 2.5rem', $html);
-        $this->assertStringNotContainsString('margin-inline-start: 3.75rem', $html);
-        $this->assertStringNotContainsString('margin-inline-start: 5rem', $html);
-        // The tree is wrapped in a locally scrollable container so deep
-        // indentation cannot widen the page.
+        // Indentation is capped by CSS at level three and no longer emitted as
+        // an inline style, so a deeper node cannot keep widening the page.
+        $this->assertStringNotContainsString('margin-inline-start', $html);
+        // The tree is wrapped in a locally scrollable container so the readable
+        // card floor cannot widen the page.
         $this->assertStringContainsString('organization-tree-scroll', $html);
-        // Valid hierarchy cards fill their parent; only over-depth data gets local-scroll floor.
+        // Valid hierarchy cards still carry the collapsible contract.
         $this->assertStringContainsString('organization-unit-card', $html);
-        $this->assertStringContainsString('style="width: 100%; margin-inline-start: 2.5rem"', $html);
+        $this->assertStringContainsString('data-tree-node', $html);
+        $this->assertStringContainsString('data-tree-children', $html);
         $this->assertStringNotContainsString('min-width: 40rem', $html);
         // The heading must be allowed to wrap inside its flex row.
         $this->assertMatchesRegularExpression(
-            '/<h2 class="text-lg[^"]*break-words[^"]*">/',
+            '/class="[^"]*break-words[^"]*">Ranting Banjarmasin Utara</',
             $html,
             'Nested unit headings must break long names instead of overflowing.',
         );
@@ -565,8 +563,13 @@ class PublicUiRenderTest extends TestCase
 
         $html = $this->get(route('public.organization.index'))->assertOk()->getContent();
 
-        $this->assertSame(9, substr_count($html, 'min-width: 40rem;'));
-        $this->assertSame(13, substr_count($html, 'style="width: 100%;'));
+        // A twelve-level chain produces thirteen nodes, each carrying the tree
+        // contract, and never an inline width or indent that would compound.
+        $this->assertSame(13, substr_count($html, 'data-tree-node'));
+        $this->assertStringNotContainsString('min-width: 40rem', $html);
+        $this->assertStringNotContainsString('style="width: 100%', $html);
+        // The innermost unit still reaches the page so no depth is truncated.
+        $this->assertStringContainsString('Unit tingkat 12', $html);
     }
 
     public function test_profile_page_uses_editorial_width_and_no_invented_sections(): void
