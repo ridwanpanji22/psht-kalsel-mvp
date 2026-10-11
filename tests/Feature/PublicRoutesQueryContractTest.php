@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\GalleryCategory;
 use App\Enums\PublicationStatus;
+use App\OrganizationUnitType;
 use App\Models\Event;
 use App\Models\Gallery;
 use App\Models\Media;
@@ -523,6 +524,42 @@ class PublicRoutesQueryContractTest extends TestCase
         $this->assertStringContainsString(route('public.media.show', $media), $html);
         $this->assertStringContainsString('data-gallery-open', $html);
         $this->assertStringContainsString('Album Grid', $html);
+    }
+
+    public function test_structure_page_renders_every_unit_with_tree_hooks_for_progressive_enhancement(): void
+    {
+        $province = OrganizationUnit::factory()->create([
+            'name' => 'Pengurus Provinsi Kalimantan Selatan',
+            'type' => OrganizationUnitType::Provinsi,
+        ]);
+        $branch = OrganizationUnit::factory()->create([
+            'name' => 'Cabang Banjarmasin',
+            'type' => OrganizationUnitType::Cabang,
+            'parent_id' => $province->id,
+        ]);
+        OrganizationUnit::factory()->create([
+            'name' => 'Ranting Banjarmasin Timur',
+            'type' => OrganizationUnitType::Ranting,
+            'parent_id' => $branch->id,
+        ]);
+
+        $html = $this->get(route('public.organization.index'))->assertOk()->getContent();
+
+        // Every unit is present in the server-rendered HTML before JS runs, so
+        // the page stays complete for crawlers and no-JS visitors.
+        $this->assertStringContainsString('Pengurus Provinsi Kalimantan Selatan', $html);
+        $this->assertStringContainsString('Cabang Banjarmasin', $html);
+        $this->assertStringContainsString('Ranting Banjarmasin Timur', $html);
+
+        // The progressive-enhancement contract the tree script relies on.
+        $this->assertStringContainsString('id="organization-tree"', $html);
+        $this->assertStringContainsString('data-tree-node', $html);
+        $this->assertStringContainsString('data-tree-toggle', $html);
+        $this->assertSame(3, substr_count($html, 'data-unit-name='));
+        $this->assertStringContainsString('data-unit-type="cabang"', $html);
+
+        // Only the units that own children expose a toggle.
+        $this->assertSame(2, substr_count($html, 'data-tree-toggle'));
     }
 
     public function test_gallery_index_orders_by_published_at_desc_and_paginates_twelve_while_preserving_category(): void

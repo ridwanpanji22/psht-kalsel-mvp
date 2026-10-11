@@ -116,64 +116,172 @@
     line-height: 0.85;
 }
 
-/* Organization hierarchy (parent vs supervising branch). */
+/* ------------------------------------------------------------------ */
+/* Organization hierarchy (collapsible tree)                            */
+/* ------------------------------------------------------------------ */
+
 .organization-tree,
-.tree-children {
+.organization-children {
     list-style: none;
     padding-left: 0;
+    margin: 0;
 }
 
-.tree-children {
+.organization-children {
     margin-left: 0.75rem;
     border-left: 1px solid rgb(255 255 255 / 0.15);
     padding-left: 1rem;
+    overflow: hidden;
+    transition: max-height 300ms ease, opacity 250ms ease;
 }
 
-/* Deep hierarchies keep their guide line but reduce the extra indent so the
-   innermost card stays wide enough to render its name without overflowing.
-   The indent compounds at every level, so levels below the first two trade
-   some indentation and card padding for readable width. */
-.tree-children .tree-children {
+.organization-children[hidden] {
+    display: none;
+}
+
+/* Deep hierarchies keep their guide line but stop compounding the indent so
+   the innermost card stays wide enough to render its name at 320px. */
+.organization-children .organization-children {
     margin-left: 0.5rem;
     padding-left: 0.5rem;
 }
 
-.tree-children .tree-children .psht-card {
+.organization-children .organization-children .organization-unit-card {
     padding: 0.75rem;
 }
 
-.tree-children .tree-children .psht-card h2 {
+.organization-children .organization-children .organization-unit-card .text-lg {
     font-size: 1rem;
     line-height: 1.4;
 }
 
-/* Third and deeper levels: the guide line is kept but the indent stops
-   compounding so the card keeps enough width at 320px viewports. */
-.tree-children .tree-children .tree-children {
+.organization-children .organization-children .organization-children {
     margin-left: 0.25rem;
     padding-left: 0.25rem;
 }
 
-.tree-children .tree-children .tree-children .psht-card {
+.organization-children .organization-children .organization-children .organization-unit-card {
     padding: 0.5rem 0.625rem;
 }
 
-.tree-children .tree-children .tree-children .psht-card h2 {
+.organization-children .organization-children .organization-children .organization-unit-card .text-lg {
     font-size: 0.9375rem;
 }
 
-/* Beyond the third level the indent would only repeat the same guide line
-   while consuming the card's width; keep the line, drop the extra indent. */
-.tree-children .tree-children .tree-children .tree-children {
-    margin-left: 0;
-    padding-left: 0;
+/* Type accent on the card's left border; mirrors OrganizationUnitType. */
+.organization-unit-card[data-unit-type='provinsi'] {
+    border-left-color: #2162ed;
 }
 
-/* Cards deeper than the formal hierarchy keep a readable fixed width; this
-   wrapper confines the resulting tree inside the viewport column. */
-.organization-tree-scroll {
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
+.organization-unit-card[data-unit-type='cabang'] {
+    border-left-color: #f97316;
+}
+
+.organization-unit-card[data-unit-type='ranting'] {
+    border-left-color: #22c55e;
+}
+
+.organization-unit-card[data-unit-type='rayon'] {
+    border-left-color: #a855f7;
+}
+
+.organization-unit-card[data-unit-type='ukm'] {
+    border-left-color: #ec4899;
+}
+
+.organization-unit-card[data-unit-type='komisariat'] {
+    border-left-color: #06b6d4;
+}
+
+.organization-unit-toggle {
+    cursor: pointer;
+    min-height: 44px;
+    touch-action: manipulation;
+}
+
+.organization-unit-toggle:focus-visible {
+    outline: 2px solid #2162ed;
+    outline-offset: 3px;
+    border-radius: 0.5rem;
+}
+
+.organization-unit-chevron {
+    display: inline-block;
+    transition: transform 200ms ease;
+    transform: rotate(90deg);
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.organization-unit-card[data-collapsed='true'] > .organization-unit-toggle .organization-unit-chevron {
+    transform: rotate(0deg);
+}
+
+/* Tree toolbar: search, type filters, bulk expand/collapse. */
+.organization-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.organization-search {
+    min-height: 44px;
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 0.5rem;
+    background: rgb(255 255 255 / 0.04);
+    color: #fff;
+}
+
+.organization-search:focus-visible {
+    outline: 2px solid #2162ed;
+    outline-offset: 2px;
+}
+
+.organization-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.organization-filter {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    border: 1px solid rgb(255 255 255 / 0.12);
+    border-radius: 999px;
+    padding: 0.35rem 0.9rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #d6d3d1;
+    background: rgb(255 255 255 / 0.03);
+    cursor: pointer;
+    touch-action: manipulation;
+    transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.organization-filter:hover {
+    border-color: #2162ed;
+    color: #fff;
+}
+
+.organization-filter[aria-pressed='true'] {
+    background: #0720b0;
+    border-color: #2162ed;
+    color: #fff;
+}
+
+.organization-filter:focus-visible {
+    outline: 2px solid #2162ed;
+    outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .organization-children,
+    .organization-unit-chevron,
+    .organization-filter {
+        transition: none;
+    }
 }
 
 /* ------------------------------------------------------------------ */
