@@ -1,0 +1,24 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: psht-kalsel-mvp
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "false"
+      DB_CONNECTION: sqlite
+      DB_DATABASE: /app/database/database.sqlite
+    ports:
+      - "18080:8080"
+    volumes:
+      - psht-mvp-database:/app/database
+      - psht-mvp-storage-public:/app/storage/app/public
+      - psht-mvp-storage-private:/app/storage/app/private
+      - psht-mvp-storage-logs:/app/storage/logs
+
+volumes:
+  psht-mvp-database:
+  psht-mvp-storage-public:
+  psht-mvp-storage-private:
+  psht-mvp-storage-logs:
