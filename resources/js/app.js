@@ -6,12 +6,22 @@ import markerIconUrl from 'leaflet/dist/images/marker-icon.png';
 import markerShadowUrl from 'leaflet/dist/images/marker-shadow.png';
 import { initGalleryCarousels } from './gallery-carousel';
 import { initGalleryLightbox } from './public-gallery-lightbox';
-import { initOrganizationTree } from './organization-tree';
 
 // Leaflet resolves its default marker images relative to the stylesheet at
-// runtime, which breaks under Vite's hashed asset URLs (the icon 404s and the
-// marker renders as a broken image). Import the images so Vite fingerprints
-// them, then point the default icon at those resolved URLs.
+// runtime, which breaks under Vite's asset URLs: `L.Icon.Default` always
+// prepends `imagePath` to the configured icon value, so an already-absolute
+// import URL becomes `images/http://...` and 404s. Import the images so Vite
+// fingerprints them, then bypass Leaflet's relative resolution entirely by
+// overriding `_getIconUrl` to return the resolved URLs verbatim.
+L.Icon.Default.prototype._getIconUrl = function (name) {
+    const urls = {
+        icon: markerIconUrl,
+        icon2x: markerIcon2xUrl,
+        shadow: markerShadowUrl,
+    };
+
+    return urls[name];
+};
 L.Icon.Default.mergeOptions({
     iconRetinaUrl: markerIcon2xUrl,
     iconUrl: markerIconUrl,
@@ -26,6 +36,10 @@ if (mapElement instanceof HTMLElement && locationDataElement instanceof HTMLScri
 
     if (locations.length > 0) {
         const map = L.map(mapElement, { scrollWheelZoom: false, zoomControl: true }).setView([-3.0, 115.0], 7);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        }).addTo(map);
         const markers = L.featureGroup();
 
         for (const location of locations) {
@@ -114,10 +128,4 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => initGalleryLightbox());
 } else {
     initGalleryLightbox();
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => initOrganizationTree());
-} else {
-    initOrganizationTree();
 }
