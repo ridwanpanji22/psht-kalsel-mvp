@@ -29,7 +29,7 @@
                 </ul>
 
                 <div id="training-map" class="mt-8 overflow-hidden rounded-xl border border-white/10" role="region" aria-label="Peta tempat latihan"></div>
-                <p class="mt-2 text-sm text-stone-400">Peta menampilkan titik lokasi latihan terverifikasi. Latar peta dasar belum diaktifkan.</p>
+        <p class="mt-2 text-sm text-stone-400">Peta menampilkan titik lokasi latihan terverifikasi. Klik penanda untuk melihat nama dan alamatnya.</p>
             @endif
         </div>
     </section>
