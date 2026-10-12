@@ -36,10 +36,10 @@ RUN apk add --no-cache \
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-WORKDIR /app
+WORKDIR /var/www/html
 
 # Application source
-COPY . /app
+COPY . /var/www/html
 
 # Install PHP and Node dependencies, then build front-end assets.
 RUN composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader \

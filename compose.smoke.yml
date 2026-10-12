@@ -8,15 +8,14 @@ services:
       APP_ENV: local
       APP_DEBUG: "false"
       DB_CONNECTION: sqlite
-      DB_DATABASE: /app/database/database.sqlite
+      DB_DATABASE: /var/www/html/database/database.sqlite
     ports:
       - "18080:8080"
     volumes:
-      - psht-mvp-database:/app/database
-      - psht-mvp-storage-public:/app/storage/app/public
-      - psht-mvp-storage-private:/app/storage/app/private
-      - psht-mvp-storage-logs:/app/storage/logs
-
+      - psht-mvp-database:/var/www/html/database
+      - psht-mvp-storage-public:/var/www/html/storage/app/public
+      - psht-mvp-storage-private:/var/www/html/storage/app/private
+      - psht-mvp-storage-logs:/var/www/html/storage/logs
 volumes:
   psht-mvp-database:
   psht-mvp-storage-public:
