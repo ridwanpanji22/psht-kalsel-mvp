@@ -13,10 +13,27 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Informasi resmi organisasi PSHT Kalimantan Selatan.">
+    <meta name="description" content="@yield('meta_description', 'Informasi resmi organisasi PSHT Kalimantan Selatan.')">
     <title>@yield('title', 'PSHT Kalimantan Selatan')</title>
-    @stack('head')
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+
+    {{-- Open Graph and Twitter Card tags for link previews (WhatsApp, Telegram, X). --}}
+    <meta property="og:type" content="@yield('og_type', 'website')">
+    <meta property="og:site_name" content="PSHT Kalimantan Selatan">
+    <meta property="og:locale" content="id_ID">
+    <meta property="og:title" content="@yield('og_title', View::yieldContent('title', 'PSHT Kalimantan Selatan'))">
+    <meta property="og:description" content="@yield('og_description', View::yieldContent('meta_description', 'Informasi resmi organisasi PSHT Kalimantan Selatan.'))">
+    <meta property="og:url" content="@yield('og_url', url()->current())">
+    <meta property="og:image" content="@yield('og_image', url('/images/psht-kalsel-social-preview.jpg'))">
+    <meta property="og:image:secure_url" content="@yield('og_image', url('/images/psht-kalsel-social-preview.jpg'))">
+    <meta property="og:image:type" content="image/jpeg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="PSHT Kalimantan Selatan">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="@yield('og_title', View::yieldContent('title', 'PSHT Kalimantan Selatan'))">
+    <meta name="twitter:description" content="@yield('og_description', View::yieldContent('meta_description', 'Informasi resmi organisasi PSHT Kalimantan Selatan.'))">
+    <meta name="twitter:image" content="@yield('og_image', url('/images/psht-kalsel-social-preview.jpg'))">
+    @stack('meta')
 </head>
 <body class="psht-shell min-h-screen bg-psht-bg text-stone-100 antialiased">
     @unless(View::hasSection('homepage-header'))
