@@ -34,6 +34,7 @@
     <meta name="twitter:description" content="@yield('og_description', View::yieldContent('meta_description', 'Informasi resmi organisasi PSHT Kalimantan Selatan.'))">
     <meta name="twitter:image" content="@yield('og_image', url('/images/psht-kalsel-social-preview.jpg'))">
     @stack('meta')
+    @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="psht-shell min-h-screen bg-psht-bg text-stone-100 antialiased">
     @unless(View::hasSection('homepage-header'))
